@@ -4,16 +4,17 @@
 	type Props = {
 		mode: 'sign-in' | 'log-out';
 		variant?: 'primary' | 'outline';
+		nextPath?: string;
 	};
 
-	let { mode, variant = 'outline' }: Props = $props();
+	let { mode, variant = 'outline', nextPath }: Props = $props();
 
 	let loading = $state(false);
 	let errorMessage = $state<string | null>(null);
 
 	const buttonClass = $derived(
 		variant === 'primary'
-			? 'rounded-lg bg-blue-600 px-6 py-3 text-sm font-medium text-white transition hover:bg-blue-700 disabled:opacity-60'
+			? 'rounded-md border border-slate-900 bg-slate-900 px-6 py-3 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-60'
 			: 'rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:opacity-60'
 	);
 
@@ -23,7 +24,7 @@
 
 		try {
 			if (mode === 'sign-in') {
-				await signInWithGoogle();
+				await signInWithGoogle(nextPath);
 			} else {
 				await signOut();
 			}

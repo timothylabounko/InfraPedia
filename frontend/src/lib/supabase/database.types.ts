@@ -120,6 +120,63 @@ export interface Database {
 				};
 				Relationships: [];
 			};
+			project_data: {
+				Row: {
+					id: string;
+					project_id: string;
+					key: string;
+					value: Json;
+					created_at: string;
+					updated_at: string;
+				};
+				Insert: {
+					id?: string;
+					project_id: string;
+					key: string;
+					value: Json;
+					created_at?: string;
+					updated_at?: string;
+				};
+				Update: {
+					id?: string;
+					project_id?: string;
+					key?: string;
+					value?: Json;
+					created_at?: string;
+					updated_at?: string;
+				};
+				Relationships: [];
+			};
+			chat_messages: {
+				Row: {
+					id: string;
+					project_id: string;
+					user_id: string | null;
+					role: string;
+					content: string;
+					tool_calls: Json;
+					created_at: string;
+				};
+				Insert: {
+					id?: string;
+					project_id: string;
+					user_id?: string | null;
+					role: string;
+					content: string;
+					tool_calls?: Json;
+					created_at?: string;
+				};
+				Update: {
+					id?: string;
+					project_id?: string;
+					user_id?: string | null;
+					role?: string;
+					content?: string;
+					tool_calls?: Json;
+					created_at?: string;
+				};
+				Relationships: [];
+			};
 		};
 		Views: Record<string, never>;
 		Functions: Record<string, never>;

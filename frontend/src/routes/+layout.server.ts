@@ -10,7 +10,15 @@ export const load: LayoutServerLoad = async ({ locals }) => {
 			.select('id, username, email')
 			.eq('id', locals.user.id)
 			.single();
-		profile = data as UserProfile | null;
+
+		if (data) {
+			profile = {
+				...data,
+				display_icon: (locals.user.user_metadata?.display_icon as string | undefined) ?? null,
+				avatar_color: (locals.user.user_metadata?.avatar_color as string | undefined) ?? null,
+				avatar_url: (locals.user.user_metadata?.avatar_url as string | undefined) ?? null
+			};
+		}
 	}
 
 	return {

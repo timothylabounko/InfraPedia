@@ -9,7 +9,9 @@
 
 <svelte:head><link rel="icon" href={favicon} /></svelte:head>
 
-<div class="min-h-screen bg-slate-50">
+<div class="flex h-screen flex-col overflow-hidden bg-slate-50">
 	<AppHeader {data} />
-	{@render children()}
+	<div class="flex min-h-0 flex-1 flex-col overflow-hidden">
+		{@render children()}
+	</div>
 </div>

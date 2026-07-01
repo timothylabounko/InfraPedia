@@ -1,4 +1,5 @@
 <script lang="ts">
+	import BackButton from '$lib/components/BackButton.svelte';
 	import { enhance } from '$app/forms';
 	import type { ActionData, PageData } from './$types';
 
@@ -7,10 +8,9 @@
 
 <main class="mx-auto max-w-3xl px-6 py-10">
 	<header class="mb-8">
-		<h1 class="text-2xl font-bold text-slate-900">Create a project</h1>
-		<p class="mt-1 text-sm text-slate-600">
-			Add a new project to your library. <a href="/" class="text-blue-600 hover:underline">Back to library</a>
-		</p>
+		<BackButton />
+		<h1 class="mt-4 text-2xl font-bold text-slate-900">Create a project</h1>
+		<p class="mt-1 text-sm text-slate-600">Add a new project to your library.</p>
 	</header>
 
 	<section class="mb-8 rounded-lg border border-gray-200 p-6">
@@ -60,7 +60,7 @@
 
 			<button
 				type="submit"
-				class="rounded-lg bg-blue-600 px-4 py-2 font-medium text-white hover:bg-blue-700"
+				class="rounded-md border border-slate-900 bg-slate-900 px-4 py-2 font-medium text-white hover:bg-slate-800"
 			>
 				Create project
 			</button>

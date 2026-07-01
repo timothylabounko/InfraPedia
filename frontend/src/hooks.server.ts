@@ -5,11 +5,11 @@ export const handle: Handle = async ({ event, resolve }) => {
 	event.locals.supabase = createClient(event.cookies);
 
 	const {
-		data: { session }
-	} = await event.locals.supabase.auth.getSession();
+		data: { user }
+	} = await event.locals.supabase.auth.getUser();
 
-	event.locals.session = session;
-	event.locals.user = session?.user ?? null;
+	event.locals.session = user ? (await event.locals.supabase.auth.getSession()).data.session : null;
+	event.locals.user = user ?? null;
 
 	return resolve(event, {
 		filterSerializedResponseHeaders(name) {

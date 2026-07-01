@@ -3,10 +3,11 @@ import type { RequestHandler } from './$types';
 
 export const GET: RequestHandler = async ({ url, locals }) => {
 	const code = url.searchParams.get('code');
+	const next = url.searchParams.get('next') ?? '/';
 
 	if (code) {
 		await locals.supabase.auth.exchangeCodeForSession(code);
 	}
 
-	redirect(303, '/');
+	redirect(303, next.startsWith('/') ? next : '/');
 };
