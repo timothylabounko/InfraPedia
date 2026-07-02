@@ -80,29 +80,17 @@ export function snapToLines(
 	return { lng, lat, snapped: false, distanceM: best.distanceM };
 }
 
-/** Insert curve midpoints for gentler rendering */
-export function applyCurvature(
-	coords: [number, number][],
-	curvature: LineCurvature
-): [number, number][] {
-	if (coords.length < 3 || curvature === 'straight') return coords;
+/** Default roundness percent for a line-level curvature preset */
+export { defaultRoundnessForCurvature } from './line-edit';
 
-	const out: [number, number][] = [coords[0]];
-	for (let i = 1; i < coords.length - 1; i++) {
-		const prev = coords[i - 1];
-		const curr = coords[i];
-		const next = coords[i + 1];
-		const t = curvature === 'smooth' ? 0.35 : 0.2;
-
-		out.push([
-			curr[0] + (prev[0] - curr[0]) * t * 0.5 + (next[0] - curr[0]) * t * 0.5,
-			curr[1] + (prev[1] - curr[1]) * t * 0.5 + (next[1] - curr[1]) * t * 0.5
-		]);
-		out.push(curr);
-	}
-	out.push(coords[coords.length - 1]);
-	return out;
-}
+/** Circular fillet rendering — see line-curves.ts */
+export {
+	applyCurvature,
+	roundnessAtIndex,
+	computeFillet,
+	computeCornerCurve,
+	roundedSegment
+} from './line-curves';
 
 export function snapThresholdForZoom(zoom: number): number {
 	return Math.max(15, 1200 / Math.pow(2, zoom - 10));

@@ -1,4 +1,5 @@
 import type { User } from '@supabase/supabase-js';
+import type { MapSource } from '$lib/metro/types';
 import { createAdminClient } from '$lib/server/admin';
 import { ensureMetroMapProjectType } from '$lib/server/ensure-metro';
 import { getSiteOwner } from '$lib/server/site-user';
@@ -7,7 +8,8 @@ type CreateResult = { id: string } | { error: string };
 
 export async function createMetroMapProject(
 	actingUser: User,
-	title: string
+	title: string,
+	mapSource: MapSource = 'osm'
 ): Promise<CreateResult> {
 	const trimmedTitle = title.trim();
 	if (!trimmedTitle) {
@@ -76,7 +78,7 @@ export async function createMetroMapProject(
 		key: 'map_state',
 		value: {
 			viewMode: 'geographic',
-			mapSource: 'osm',
+			mapSource,
 			lines: { type: 'FeatureCollection', features: [] },
 			simplifiedLines: null,
 			stations: { type: 'FeatureCollection', features: [] },

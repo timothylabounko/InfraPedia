@@ -13,6 +13,7 @@
 			{#each data.templates as template}
 				<LibraryBox
 					title={template.title}
+					creatorName={template.creatorName}
 					description={template.description}
 					subtitle={template.template}
 					href={template.previewHref ?? (template.slug ? `/projects/new/${template.slug}` : undefined)}
@@ -23,21 +24,28 @@
 			{/each}
 		</LibraryColumn>
 
-		<LibraryColumn title="Projects" tone="yellow">
-			{#if data.projects.length === 0}
-				<p class="rounded-lg border border-dashed border-black/20 p-4 text-center text-sm text-slate-600">
-					No saved projects yet. Open a template to create one.
-				</p>
-			{/if}
-			{#each data.projects as project}
+		<LibraryColumn title="Posts" tone="yellow">
+			{#each data.communityPosts as post (post.id)}
+				<LibraryBox
+					title={post.title}
+					creatorName={post.creatorName}
+					description={post.description}
+					subtitle={post.subtitle}
+					href={post.href}
+					images={post.images}
+					openLabel="Open post"
+				/>
+			{/each}
+			{#each data.projects as project (project.id)}
 				<LibraryBox
 					title={project.name}
-					description={`By ${project.creatorName || project.creatorEmail}`}
-					subtitle={project.project_types?.name ?? 'Project'}
+					creatorName={project.creatorName}
+					description={project.description ?? undefined}
+					subtitle={project.project_types?.name ?? 'Post'}
 					href={project.project_types?.slug === 'metro-map' ? `/projects/${project.id}` : undefined}
 					comingSoon={project.project_types?.slug !== 'metro-map'}
 					images={project.images}
-					openLabel="Open project"
+					openLabel="Open post"
 				/>
 			{/each}
 		</LibraryColumn>

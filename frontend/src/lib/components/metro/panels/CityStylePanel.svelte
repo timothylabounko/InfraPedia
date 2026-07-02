@@ -13,11 +13,14 @@
 	type Props = {
 		drawMode: boolean;
 		stationMode: boolean;
+		editLineMode: boolean;
+		selectedLineId: string | null;
 		drawColor: string;
 		drawStyleId: string;
 		drawWeight: number;
 		drawCurvature: LineCurvature;
 		drawEdgeType: LineEdgeType;
+		drawSnapToStreets: boolean;
 		stationIconId: StationIconId;
 		stationName: string;
 		snapEnabled: boolean;
@@ -30,6 +33,9 @@
 		onWeightChange: (w: number) => void;
 		onCurvatureChange: (c: LineCurvature) => void;
 		onEdgeTypeChange: (e: LineEdgeType) => void;
+		onDrawSnapToStreetsChange: (enabled: boolean) => void;
+		onEditLine: () => void;
+		onStopEditLine: () => void;
 		onStationIconChange: (id: StationIconId) => void;
 		onStationNameChange: (name: string) => void;
 		onSnapToggle: (enabled: boolean) => void;
@@ -39,11 +45,14 @@
 	let {
 		drawMode,
 		stationMode,
+		editLineMode,
+		selectedLineId,
 		drawColor,
 		drawStyleId,
 		drawWeight,
 		drawCurvature,
 		drawEdgeType,
+		drawSnapToStreets,
 		stationIconId,
 		stationName,
 		snapEnabled,
@@ -56,6 +65,9 @@
 		onWeightChange,
 		onCurvatureChange,
 		onEdgeTypeChange,
+		onDrawSnapToStreetsChange,
+		onEditLine,
+		onStopEditLine,
 		onStationIconChange,
 		onStationNameChange,
 		onSnapToggle,
@@ -251,6 +263,50 @@
 		value={stationName}
 		oninput={(e) => onStationNameChange(e.currentTarget.value)}
 	/>
+
+	<div class="grid grid-cols-2 gap-2">
+		{#if editLineMode}
+			<button
+				type="button"
+				data-highlight-id="disable_edit_line_mode"
+				class="col-span-2 h-9 rounded-md border border-sky-300 bg-sky-50 text-xs font-medium text-sky-900"
+				onclick={onStopEditLine}
+			>
+				Stop editing lines
+			</button>
+		{:else}
+			<button
+				type="button"
+				data-highlight-id="enable_edit_line_mode"
+				class="col-span-2 h-9 rounded-md border border-sky-600 bg-sky-600 text-xs font-medium text-white"
+				onclick={onEditLine}
+			>
+				Edit lines
+			</button>
+		{/if}
+	</div>
+
+	{#if editLineMode && selectedLineId}
+		<p class="text-[10px] leading-snug text-slate-500">
+			Click a line to select it. Click a segment to add a bend, drag to shape it, or click
+			Click a corner point to curve between its two neighbours (−100 snakey to +100 rounded).
+			Right-click for more options. Esc to deselect.
+		</p>
+	{:else}
+		<p class="text-[10px] leading-snug text-slate-500">
+			Click any line on the map to start editing — no need to press Edit lines first.
+		</p>
+	{/if}
+
+	<label class="flex cursor-pointer items-center gap-2 text-xs text-slate-600">
+		<input
+			type="checkbox"
+			class="size-4 rounded"
+			checked={drawSnapToStreets}
+			onchange={(e) => onDrawSnapToStreetsChange(e.currentTarget.checked)}
+		/>
+		Snap new lines to streets
+	</label>
 
 	<label class="flex cursor-pointer items-center gap-2 text-xs text-slate-600">
 		<input

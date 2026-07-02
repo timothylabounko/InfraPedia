@@ -1,4 +1,6 @@
 import { DEFAULT_LINE_STYLE_ID, getLineStyle } from './line-styles';
+import { materializeCornerVertices } from './line-curves';
+import { syncVertexRoundnessLength } from './line-edit';
 import type { MetroGeoJSON, MetroLineFeature } from './types';
 
 const SNAP_ANGLES = [0, 45, 90, 135, 180, 225, 270, 315];
@@ -105,6 +107,8 @@ export function simplifyMetroMap(geojson: MetroGeoJSON): MetroGeoJSON {
 		features: geojson.features.map((feature: MetroLineFeature, index: number) => {
 			const coords = feature.geometry.coordinates as [number, number][];
 			const style = getLineStyle(feature.properties?.styleId ?? DEFAULT_LINE_STYLE_ID);
+			const curvature = feature.properties?.curvature ?? style.curvature ?? 'straight';
+			const simplifiedCoords = materializeCornerVertices(simplifyLineString(coords));
 			return {
 				...feature,
 				properties: {
@@ -117,13 +121,19 @@ export function simplifyMetroMap(geojson: MetroGeoJSON): MetroGeoJSON {
 					lineJoin: feature.properties?.lineJoin ?? style.lineJoin,
 					casingColor: feature.properties?.casingColor ?? style.casingColor,
 					casingExtra: feature.properties?.casingExtra ?? style.casingExtra,
-					curvature: feature.properties?.curvature ?? style.curvature,
+					curvature,
 					edgeType: feature.properties?.edgeType ?? style.edgeType,
+					snapToStreets: feature.properties?.snapToStreets,
+					vertexRoundness: syncVertexRoundnessLength(
+						feature.properties?.vertexRoundness,
+						coords.length,
+						simplifiedCoords.length
+					),
 					name: feature.properties?.name
 				},
 				geometry: {
 					type: 'LineString',
-					coordinates: simplifyLineString(coords)
+					coordinates: simplifiedCoords
 				}
 			};
 		})

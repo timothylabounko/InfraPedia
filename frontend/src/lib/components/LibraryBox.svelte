@@ -6,6 +6,7 @@
 		title: string;
 		description?: string;
 		subtitle?: string;
+		creatorName?: string;
 		href?: string;
 		comingSoon?: boolean;
 		images?: string[];
@@ -26,6 +27,7 @@
 		title,
 		description = '',
 		subtitle,
+		creatorName,
 		href,
 		comingSoon = true,
 		images = [],
@@ -167,7 +169,9 @@
 		{:else if subtitle}
 			<p class="text-[10px] font-medium uppercase tracking-wide {subtitleClass}">{subtitle}</p>
 		{/if}
-		<h3 class="line-clamp-1 text-sm font-semibold leading-tight">{title}</h3>
+		<h3 class="line-clamp-1 text-sm font-semibold leading-tight">
+			{title}{#if creatorName}<span class="font-normal text-slate-500"> · {creatorName}</span>{/if}
+		</h3>
 		{#if description}
 			<p class="line-clamp-2 text-xs leading-snug {descriptionClass}">{description}</p>
 		{/if}

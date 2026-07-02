@@ -68,6 +68,10 @@ export type LineProperties = {
 	casingExtra?: number;
 	curvature?: LineCurvature;
 	edgeType?: LineEdgeType;
+	/** Snap vertices to nearest OSM street centerline */
+	snapToStreets?: boolean;
+	/** Per-vertex corner roundness -100..100 (same length as coordinates) */
+	vertexRoundness?: number[];
 };
 
 export type MetroLineFeature = {
@@ -102,6 +106,12 @@ export type AgentActionName =
 	| 'draw_line'
 	| 'add_station'
 	| 'set_draw_style'
+	| 'enable_edit_line_mode'
+	| 'disable_edit_line_mode'
+	| 'select_line'
+	| 'set_line_rules'
+	| 'update_line'
+	| 'extend_line'
 	| 'simplify_map'
 	| 'set_view_mode'
 	| 'set_map_view'

@@ -168,7 +168,9 @@
 			{#each projects as project (project.id)}
 				<LibraryBox
 					title={project.name}
-					description={project.project_types?.name ?? 'Project'}
+					creatorName={project.creatorName}
+					description={project.description ?? undefined}
+					subtitle={project.project_types?.name ?? 'Post'}
 					theme={visibilityTheme(project.visibility)}
 					visibilityLabel={visibilityLabel(project.visibility)}
 					href={selectMode

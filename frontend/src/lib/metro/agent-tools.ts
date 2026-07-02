@@ -39,7 +39,10 @@ export const TOOL_DEFINITIONS = [
 					type: 'string',
 					enum: ['boston', 'nyc', 'delhi', 'london', 'paris', 'tokyo', 'dc']
 				},
-				weight: { type: 'number', description: 'Line thickness 2-8' }
+				weight: { type: 'number', description: 'Line thickness 2-8' },
+				curvature: { type: 'string', enum: ['straight', 'gentle', 'smooth'] },
+				edgeType: { type: 'string', enum: ['square', 'round', 'bevel', 'miter'] },
+				snapToStreets: { type: 'boolean' }
 			},
 			required: ['coordinates']
 		}
@@ -63,7 +66,8 @@ export const TOOL_DEFINITIONS = [
 	},
 	{
 		name: 'set_draw_style',
-		description: 'Set the current draw style for new lines (color, preset, thickness).',
+		description:
+			'Set the current draw style for new lines (color, preset, thickness, corner rounding, edge type, street snapping).',
 		input_schema: {
 			type: 'object',
 			properties: {
@@ -72,9 +76,84 @@ export const TOOL_DEFINITIONS = [
 					type: 'string',
 					enum: ['boston', 'nyc', 'delhi', 'london', 'paris', 'tokyo', 'dc']
 				},
-				weight: { type: 'number' }
+				weight: { type: 'number' },
+				curvature: { type: 'string', enum: ['straight', 'gentle', 'smooth'] },
+				edgeType: { type: 'string', enum: ['square', 'round', 'bevel', 'miter'] },
+				snapToStreets: { type: 'boolean', description: 'Snap new line vertices to OSM streets' }
 			},
 			required: []
+		}
+	},
+	{
+		name: 'enable_edit_line_mode',
+		description: 'Turn on line editing mode — user can select lines, drag vertices, and extend lines.',
+		input_schema: { type: 'object', properties: {}, required: [] }
+	},
+	{
+		name: 'disable_edit_line_mode',
+		description: 'Turn off line editing mode.',
+		input_schema: { type: 'object', properties: {}, required: [] }
+	},
+	{
+		name: 'select_line',
+		description: 'Select a line by id for editing.',
+		input_schema: {
+			type: 'object',
+			properties: {
+				lineId: { type: 'string', description: 'Line feature id from project context' }
+			},
+			required: ['lineId']
+		}
+	},
+	{
+		name: 'set_line_rules',
+		description:
+			'Update rules for an existing line: corner rounding, edge style, street snapping, optional name.',
+		input_schema: {
+			type: 'object',
+			properties: {
+				lineId: { type: 'string' },
+				name: { type: 'string' },
+				curvature: { type: 'string', enum: ['straight', 'gentle', 'smooth'] },
+				edgeType: { type: 'string', enum: ['square', 'round', 'bevel', 'miter'] },
+				snapToStreets: { type: 'boolean' },
+				color: { type: 'string' },
+				weight: { type: 'number' }
+			},
+			required: ['lineId']
+		}
+	},
+	{
+		name: 'update_line',
+		description: 'Replace all coordinates of an existing line.',
+		input_schema: {
+			type: 'object',
+			properties: {
+				lineId: { type: 'string' },
+				coordinates: {
+					type: 'array',
+					items: { type: 'array', items: { type: 'number' } },
+					description: 'Full [lng, lat] path, at least 2 points'
+				}
+			},
+			required: ['lineId', 'coordinates']
+		}
+	},
+	{
+		name: 'extend_line',
+		description: 'Add points to the start or end of an existing line.',
+		input_schema: {
+			type: 'object',
+			properties: {
+				lineId: { type: 'string' },
+				end: { type: 'string', enum: ['start', 'end'] },
+				coordinates: {
+					type: 'array',
+					items: { type: 'array', items: { type: 'number' } },
+					description: 'New [lng, lat] points to prepend (start) or append (end)'
+				}
+			},
+			required: ['lineId', 'end', 'coordinates']
 		}
 	},
 	{
@@ -148,6 +227,12 @@ export const BUTTON_LABELS: Record<AgentActionName, string> = {
 	draw_line: 'Draw line',
 	add_station: 'Add station',
 	set_draw_style: 'Line style',
+	enable_edit_line_mode: 'Edit lines',
+	disable_edit_line_mode: 'Stop editing',
+	select_line: 'Select line',
+	set_line_rules: 'Line rules',
+	update_line: 'Update line',
+	extend_line: 'Extend line',
 	simplify_map: 'Simplify map',
 	set_view_mode: 'View mode',
 	set_map_view: 'Pan & zoom',
@@ -195,6 +280,12 @@ export function highlightIdForAction(action: AgentAction): string {
 			return 'panel_style';
 		case 'enable_draw_mode':
 		case 'enable_station_mode':
+		case 'enable_edit_line_mode':
+			return 'panel_style';
+		case 'select_line':
+		case 'set_line_rules':
+		case 'update_line':
+		case 'extend_line':
 			return 'panel_style';
 		case 'add_station':
 			return 'panel_style';
@@ -223,6 +314,10 @@ export function actionSummary(action: AgentAction): string {
 		extra.push(String(action.input.mode));
 	} else if (action.name === 'set_map_source') {
 		extra.push(String(action.input.source));
+	} else if (action.name === 'select_line' && action.input.lineId) {
+		extra.push(String(action.input.lineId));
+	} else if (action.name === 'extend_line') {
+		extra.push(String(action.input.end));
 	}
 	return extra.length ? `${label} (${extra.join(', ')})` : label;
 }

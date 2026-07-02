@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { actionSummary, highlightIdForAction, parseAgentActions } from '$lib/metro/agent-tools';
 	import type { AgentAction } from '$lib/metro/types';
 
@@ -22,10 +23,55 @@
 
 	let { projectId, initialMessages, projectContext, onActions, onHighlight }: Props = $props();
 
+	const MIN_WIDTH = 240;
+	const MAX_WIDTH = 560;
+	const DEFAULT_WIDTH = 320;
+	const STORAGE_KEY = 'metro-chat-panel-width';
+
 	let messages = $state<ChatMessage[]>([...initialMessages]);
 	let input = $state('');
 	let loading = $state(false);
 	let error = $state<string | null>(null);
+	let width = $state(DEFAULT_WIDTH);
+
+	onMount(() => {
+		const stored = Number(localStorage.getItem(STORAGE_KEY));
+		if (Number.isFinite(stored) && stored >= MIN_WIDTH && stored <= MAX_WIDTH) {
+			width = stored;
+		}
+	});
+
+	function persistWidth() {
+		try {
+			localStorage.setItem(STORAGE_KEY, String(width));
+		} catch {
+			// ignore
+		}
+	}
+
+	function startResize(event: MouseEvent) {
+		event.preventDefault();
+		const startX = event.clientX;
+		const startWidth = width;
+
+		const onMove = (moveEvent: MouseEvent) => {
+			const next = startWidth + (startX - moveEvent.clientX);
+			width = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, next));
+		};
+
+		const onUp = () => {
+			window.removeEventListener('mousemove', onMove);
+			window.removeEventListener('mouseup', onUp);
+			document.body.style.cursor = '';
+			document.body.style.userSelect = '';
+			persistWidth();
+		};
+
+		document.body.style.cursor = 'col-resize';
+		document.body.style.userSelect = 'none';
+		window.addEventListener('mousemove', onMove);
+		window.addEventListener('mouseup', onUp);
+	}
 
 	async function persistMessage(
 		role: 'user' | 'assistant',
@@ -100,10 +146,22 @@
 	}
 </script>
 
-<aside class="flex min-h-0 w-80 shrink-0 flex-col border-l border-slate-200 bg-white">
+<aside
+	class="relative flex min-h-0 shrink-0 flex-col border-l border-slate-200 bg-white"
+	style="width: {width}px"
+>
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div
+		class="absolute bottom-0 left-0 top-0 z-10 w-1.5 -translate-x-1/2 cursor-col-resize hover:bg-sky-400/30 active:bg-sky-500/40"
+		role="separator"
+		aria-orientation="vertical"
+		aria-label="Resize chat panel"
+		onmousedown={startResize}
+	></div>
+
 	<div class="border-b border-slate-200 px-4 py-3">
 		<h2 class="font-semibold text-slate-900">Metro Map Assistant</h2>
-		<p class="text-xs text-slate-500">Watch toolbar highlights as tools run.</p>
+		<p class="text-xs text-slate-500">Drag the left edge to resize. Watch toolbar highlights as tools run.</p>
 	</div>
 
 	<div class="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3">

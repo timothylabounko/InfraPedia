@@ -1,7 +1,6 @@
-import { getProjectThumbnail } from '$lib/data/planning-projects';
+import { getProjectThumbnail, communityForumPosts } from '$lib/data/planning-projects';
 import { createActions } from '$lib/data/create-actions';
 import { planningProjectLibrary } from '$lib/data/planning-projects';
-import { SITE_OWNER_EMAIL } from '$lib/server/site-user';
 import type { LibraryProject } from '$lib/types/library';
 import type { PageServerLoad } from './$types';
 
@@ -26,6 +25,19 @@ export const load: PageServerLoad = async ({ locals }) => {
 
 		const rows = (published ?? []) as ProjectRow[];
 		const ids = rows.map((p) => p.id);
+		const ownerIds = [...new Set(rows.map((p) => p.owner_id))];
+
+		const ownerById: Record<string, { username: string | null; email: string }> = {};
+		if (ownerIds.length > 0) {
+			const { data: owners } = await locals.supabase
+				.from('users')
+				.select('id, username, email')
+				.in('id', ownerIds);
+
+			for (const owner of owners ?? []) {
+				ownerById[owner.id] = { username: owner.username, email: owner.email };
+			}
+		}
 
 		const previewByProject: Record<string, string[]> = {};
 		if (ids.length > 0) {
@@ -44,22 +56,28 @@ export const load: PageServerLoad = async ({ locals }) => {
 			}
 		}
 
-		projects = rows.map((row) => ({
-			id: row.id,
-			name: row.name,
-			description: row.description,
-			visibility: row.visibility,
-			isOwner: row.owner_id === locals.user!.id,
-			project_types: row.project_types,
-			creatorEmail: SITE_OWNER_EMAIL,
-			creatorName: SITE_OWNER_EMAIL,
-			images: getProjectThumbnail(row.project_types?.slug, previewByProject[row.id])
-		}));
+		projects = rows.map((row) => {
+			const owner = ownerById[row.owner_id];
+			const creatorName =
+				owner?.username ?? owner?.email?.split('@')[0] ?? 'Unknown';
+			return {
+				id: row.id,
+				name: row.name,
+				description: row.description,
+				visibility: row.visibility,
+				isOwner: row.owner_id === locals.user!.id,
+				project_types: row.project_types,
+				creatorEmail: owner?.email ?? '',
+				creatorName,
+				images: getProjectThumbnail(row.project_types?.slug, previewByProject[row.id])
+			};
+		});
 	}
 
 	return {
 		templates: planningProjectLibrary,
 		projects,
+		communityPosts: communityForumPosts,
 		createActions
 	};
 };

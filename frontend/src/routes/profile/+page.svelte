@@ -14,6 +14,12 @@
 	let avatarPreview = $state<string | null>(null);
 	let avatarFileName = $state('');
 
+	$effect(() => {
+		username = data.profile.username ?? '';
+		displayIcon = data.profile.display_icon ?? '';
+		avatarColor = data.profile.avatar_color ?? data.colorOptions[0];
+	});
+
 	const preview = $derived(
 		getAvatarContent(
 			{
@@ -62,7 +68,16 @@
 	<form
 		method="POST"
 		enctype="multipart/form-data"
-		use:enhance
+		use:enhance={() => {
+			return async ({ result, update }) => {
+				await update({ invalidateAll: true });
+				if (result.type === 'success' && result.data?.success) {
+					avatarPreview = null;
+					avatarFileName = '';
+					removeAvatar = false;
+				}
+			};
+		}}
 		class="space-y-8 rounded-xl border border-slate-200 bg-white p-6"
 	>
 		<div class="flex items-center gap-4">

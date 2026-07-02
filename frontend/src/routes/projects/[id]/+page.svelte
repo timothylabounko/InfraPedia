@@ -2,8 +2,6 @@
 
 	import AgentChat from '$lib/components/metro/AgentChat.svelte';
 
-	import LibraryImageCarousel from '$lib/components/LibraryImageCarousel.svelte';
-
 	import MetroMapEditor from '$lib/components/metro/MetroMapEditor.svelte';
 
 	import ProjectEditorBand from '$lib/components/metro/ProjectEditorBand.svelte';
@@ -25,13 +23,25 @@
 	import AiActionIndicator from '$lib/components/metro/AiActionIndicator.svelte';
 
 	import StyleBrowserModal from '$lib/components/metro/StyleBrowserModal.svelte';
+	import LineRulesModal from '$lib/components/metro/LineRulesModal.svelte';
+	import LineSegmentPopup from '$lib/components/metro/LineSegmentPopup.svelte';
+	import VertexCornerPopup from '$lib/components/metro/VertexCornerPopup.svelte';
 
 	import { createEditorHistory, cloneSnapshot } from '$lib/metro/history';
 
 	import { fetchLandcover } from '$lib/metro/landcover';
 
-	import { simplifyMetroMap, emptyStationsGeoJSON, emptyPolygonsGeoJSON, newLineId } from '$lib/metro/simplify';
+	import { simplifyLineString, simplifyMetroMap, newLineId, emptyStationsGeoJSON, emptyPolygonsGeoJSON } from '$lib/metro/simplify';
+	import { initVertexRoundness, materializeCornerVertices, vertexRoundnessForLineCurvature } from '$lib/metro/line-curves';
 	import { reprojectAttachedStations } from '$lib/metro/station-attachment';
+	import {
+		activeLineCollection,
+		extendLineEnd,
+		findLineFeature,
+		insertVertexAt,
+		updateLineInCollection,
+		withVertexRoundness
+	} from '$lib/metro/line-edit';
 	import { DEFAULT_LINE_STYLE_ID, applyLineStylePreset, getLineStyle, LINE_COLOR_SWATCHES } from '$lib/metro/line-styles';
 
 	import type {
@@ -136,6 +146,36 @@
 
 	let drawEdgeType = $state<LineEdgeType>(getLineStyle(DEFAULT_LINE_STYLE_ID).edgeType ?? 'round');
 
+	let drawSnapToStreets = $state(false);
+
+	let editLineMode = $state(false);
+
+	let selectedLineId = $state<string | null>(null);
+
+	let extendEnd = $state<'start' | 'end' | null>(null);
+
+	let lineRulesOpen = $state(false);
+
+	let lineRulesLineId = $state<string | null>(null);
+
+	let segmentMenu = $state<{
+		lineId: string;
+		segmentIndex: number;
+		point: [number, number];
+		x: number;
+		y: number;
+	} | null>(null);
+
+	let vertexCornerMenu = $state<{
+		lineId: string;
+		vertexIndex: number;
+		roundness: number;
+		x: number;
+		y: number;
+	} | null>(null);
+
+	let vertexCornerHistoryRecorded = $state(false);
+
 	let stationIconId = $state<StationIconId>(getLineStyle(DEFAULT_LINE_STYLE_ID).stationIconId);
 
 	let stationSnapEnabled = $state(true);
@@ -164,16 +204,6 @@
 	const saveLabel = $derived(saveStatus === 'Saved' ? 'Saved' : 'Save project');
 
 	let simplifying = $state(false);
-
-	let showTemplate = $state(
-
-		initialState.lines.features.length === 0 &&
-
-			!initialState.simplifiedLines?.features.length &&
-
-			initialState.stations.features.length === 0
-
-	);
 
 	let mapApi = $state<MapApi | null>(null);
 
@@ -299,11 +329,17 @@
 
 
 
-	const projectContext = $derived(
-
-		`Project: ${projectName}. Status: ${data.project.status}. Band: ${bandMode}. Map: ${mapSource}, view: ${viewMode}. Draw: ${drawColor}, style ${drawStyleId}, weight ${drawWeight}. Lines: ${mapState.lines.features.length}, schematic: ${mapState.simplifiedLines?.features.length ?? 0}, stations: ${mapState.stations.features.length}. Center: [${mapState.center[1].toFixed(4)}, ${mapState.center[0].toFixed(4)}], zoom ${mapState.zoom.toFixed(1)}.`
-
-	);
+	const projectContext = $derived.by(() => {
+		const active = activeLineCollection(
+			mapState,
+			(viewMode === 'schematic' || mapSource === 'scratch') &&
+				(mapState.simplifiedLines?.features.length ?? 0) > 0
+		);
+		const lineSummary = active.features
+			.map((f) => `${f.properties.id}${f.properties.name ? ` (${f.properties.name})` : ''}`)
+			.join('; ');
+		return `Project: ${projectName}. Status: ${data.project.status}. Band: ${bandMode}. Map: ${mapSource}, view: ${viewMode}. Draw: ${drawColor}, style ${drawStyleId}, weight ${drawWeight}, curvature ${drawCurvature}, edge ${drawEdgeType}, snapToStreets ${drawSnapToStreets}. Edit mode: ${editLineMode}. Lines: ${mapState.lines.features.length}, schematic: ${mapState.simplifiedLines?.features.length ?? 0}, stations: ${mapState.stations.features.length}. Active line ids: ${lineSummary || 'none'}. Center: [${mapState.center[1].toFixed(4)}, ${mapState.center[0].toFixed(4)}], zoom ${mapState.zoom.toFixed(1)}.`;
+	});
 
 
 
@@ -316,8 +352,6 @@
 		drawColor = applied.color;
 
 		drawWeight = applied.weight;
-
-		drawCurvature = applied.curvature;
 
 		drawEdgeType = applied.edgeType;
 
@@ -337,6 +371,132 @@
 
 
 
+	function editingSchematicLines() {
+		return (
+			(viewMode === 'schematic' || mapSource === 'scratch') &&
+			(mapState.simplifiedLines?.features.length ?? 0) > 0
+		);
+	}
+
+	function onLineGeometryChange(lineId: string, coordinates: [number, number][]) {
+		if (coordinates.length < 2) return;
+		recordHistory();
+
+		if (editingSchematicLines() && mapState.simplifiedLines) {
+			const simplifiedLines = updateLineInCollection(mapState.simplifiedLines, lineId, coordinates);
+			const stations = reprojectAttachedStations(mapState.stations, simplifiedLines);
+			mapState = { ...mapState, simplifiedLines, stations };
+		} else {
+			const lines = updateLineInCollection(mapState.lines, lineId, coordinates);
+			const simplifiedLines = autoSimplifyFromGeographic(lines);
+			let stations = mapState.stations;
+			if (simplifiedLines) {
+				stations = reprojectAttachedStations(stations, simplifiedLines);
+			}
+			mapState = { ...mapState, lines, simplifiedLines, stations };
+		}
+	}
+
+	function patchLineProperties(
+		lineId: string,
+		patch: Partial<import('$lib/metro/types').LineProperties>,
+		options?: { recordHistory?: boolean }
+	) {
+		if (options?.recordHistory !== false) recordHistory();
+
+		const collection = activeLineCollection(mapState, editingSchematicLines());
+		const feature = findLineFeature(collection, lineId);
+		if (!feature) return;
+		let fullPatch = { ...patch };
+
+		if (patch.curvature !== undefined && feature) {
+			const coords = feature.geometry.coordinates as [number, number][];
+			fullPatch.vertexRoundness = vertexRoundnessForLineCurvature(coords.length, patch.curvature);
+		}
+
+		const applyPatch = (coll: MetroGeoJSON) =>
+			updateLineInCollection(
+				coll,
+				lineId,
+				(findLineFeature(coll, lineId)?.geometry.coordinates as [number, number][]) ?? [],
+				fullPatch
+			);
+
+		if (editingSchematicLines() && mapState.simplifiedLines) {
+			const simplifiedLines = applyPatch(mapState.simplifiedLines);
+			mapState = { ...mapState, simplifiedLines };
+		} else {
+			const lines = applyPatch(mapState.lines);
+			const simplifiedLines = autoSimplifyFromGeographic(lines);
+			mapState = { ...mapState, lines, simplifiedLines };
+		}
+	}
+
+	function linePropertiesFor(id: string | null) {
+		if (!id) return null;
+		return findLineFeature(activeLineCollection(mapState, editingSchematicLines()), id)?.properties ?? null;
+	}
+
+	function startEditLine() {
+		editLineMode = true;
+		drawMode = false;
+		stationMode = false;
+		polygonMode = false;
+		extendEnd = null;
+	}
+
+	function startExtendLine(lineId: string, end: 'start' | 'end') {
+		selectedLineId = lineId;
+		editLineMode = true;
+		extendEnd = end;
+		lineRulesOpen = false;
+		segmentMenu = null;
+		mapActionBanner = `Click the map to extend the ${end}. Press Esc when done.`;
+	}
+
+	function saveVertexCorner(roundness: number) {
+		if (!vertexCornerMenu) return;
+		const { lineId, vertexIndex } = vertexCornerMenu;
+		if (!vertexCornerHistoryRecorded) recordHistory();
+		setVertexRoundness(lineId, vertexIndex, roundness, { recordHistory: false });
+		vertexCornerMenu = null;
+		vertexCornerHistoryRecorded = false;
+	}
+
+	function setVertexRoundness(
+		lineId: string,
+		vertexIndex: number,
+		roundness: number,
+		options?: { recordHistory?: boolean }
+	) {
+		const collection = activeLineCollection(mapState, editingSchematicLines());
+		const feature = findLineFeature(collection, lineId);
+		if (!feature) return;
+		const coords = feature.geometry.coordinates as [number, number][];
+		const vertexRoundness = withVertexRoundness(
+			feature.properties.vertexRoundness,
+			vertexIndex,
+			roundness,
+			coords.length
+		);
+		patchLineProperties(lineId, { vertexRoundness }, options);
+	}
+
+	function insertSegmentPoint() {
+		if (!segmentMenu) return;
+		const { lineId, segmentIndex, point } = segmentMenu;
+		const collection = activeLineCollection(mapState, editingSchematicLines());
+		const feature = findLineFeature(collection, lineId);
+		if (!feature) return;
+		const coords = insertVertexAt(
+			feature.geometry.coordinates as [number, number][],
+			segmentIndex,
+			point
+		);
+		onLineGeometryChange(lineId, coords);
+		segmentMenu = null;
+	}
+
 	function onGeographicLinesChange(lines: MetroGeoJSON) {
 
 		recordHistory();
@@ -353,8 +513,6 @@
 
 		mapState = { ...mapState, lines, simplifiedLines, stations };
 
-		if (lines.features.length > 0) showTemplate = false;
-
 	}
 
 
@@ -364,8 +522,6 @@
 		recordHistory();
 
 		mapState = { ...mapState, simplifiedLines };
-
-		showTemplate = false;
 
 	}
 
@@ -377,15 +533,11 @@
 
 		mapState = { ...mapState, stations };
 
-		showTemplate = false;
-
 	}
 
 
 
-	async function doSimplify() {
-
-		if (mapState.lines.features.length === 0 && !mapState.simplifiedLines?.features.length) return;
+	async function applySchematicView() {
 
 		simplifying = true;
 
@@ -425,9 +577,15 @@
 
 		mapState = { ...mapState, simplifiedLines, landcover, stations, viewMode: 'schematic' };
 
-		showTemplate = false;
-
 		simplifying = false;
+
+	}
+
+
+
+	async function doSimplify() {
+
+		await applySchematicView();
 
 	}
 
@@ -444,6 +602,17 @@
 		if (coordinates.length < 2) return;
 
 		const style = getLineStyle(props?.styleId ?? drawStyleId);
+
+		let coords = coordinates;
+		if (coords.length > 4) {
+			coords = simplifyLineString(coords);
+		}
+		coords = materializeCornerVertices(coords);
+
+		const curvature = props?.curvature ?? drawCurvature ?? 'straight';
+		const vertexRoundness =
+			props?.vertexRoundness ??
+			(curvature !== 'straight' ? initVertexRoundness(coords.length, curvature) : undefined);
 
 		const feature = {
 
@@ -469,15 +638,19 @@
 
 				casingExtra: props?.casingExtra ?? style.casingExtra,
 
-				curvature: props?.curvature ?? drawCurvature ?? style.curvature,
+				curvature,
 
 				edgeType: props?.edgeType ?? drawEdgeType ?? style.edgeType,
+
+				snapToStreets: props?.snapToStreets ?? drawSnapToStreets,
+
+				vertexRoundness,
 
 				name: props?.name
 
 			},
 
-			geometry: { type: 'LineString' as const, coordinates }
+			geometry: { type: 'LineString' as const, coordinates: coords }
 
 		};
 
@@ -512,8 +685,6 @@
 			mapState = { ...mapState, lines, simplifiedLines };
 
 		}
-
-		showTemplate = false;
 
 	}
 
@@ -556,8 +727,6 @@
 			}
 
 		};
-
-		showTemplate = false;
 
 	}
 
@@ -624,47 +793,27 @@
 
 		if (mode === 'geographic' && mapSource === 'scratch') return;
 
+		if (mode === 'schematic') {
+
+			void applySchematicView();
+
+			return;
+
+		}
+
 		recordHistory();
 
 		viewMode = mode;
 
 		let stations = mapState.stations;
 
-		if (mode === 'schematic' && mapState.simplifiedLines?.features.length) {
-
-			stations = reprojectAttachedStations(stations, mapState.simplifiedLines);
-
-		} else if (mode === 'geographic' && mapState.lines.features.length) {
+		if (mapState.lines.features.length) {
 
 			stations = reprojectAttachedStations(stations, mapState.lines);
 
 		}
 
 		mapState = { ...mapState, viewMode: mode, stations };
-
-		if (mode === 'schematic' && mapSource === 'osm' && !mapState.landcover) {
-
-			void fetchLandcoverForView();
-
-		}
-
-	}
-
-
-
-	async function fetchLandcoverForView() {
-
-		const bounds = mapApi?.getBounds();
-
-		if (!bounds) return;
-
-		simplifying = true;
-
-		const landcover = await fetchLandcover(bounds);
-
-		mapState = { ...mapState, landcover };
-
-		simplifying = false;
 
 	}
 
@@ -696,11 +845,15 @@
 
 		drawMode = true;
 
+		editLineMode = false;
+
+		selectedLineId = null;
+
+		extendEnd = null;
+
 		stationMode = false;
 
 		polygonMode = false;
-
-		showTemplate = false;
 
 	}
 
@@ -712,9 +865,13 @@
 
 		drawMode = false;
 
-		polygonMode = false;
+		editLineMode = false;
 
-		showTemplate = false;
+		selectedLineId = null;
+
+		extendEnd = null;
+
+		polygonMode = false;
 
 	}
 
@@ -730,8 +887,6 @@
 
 		stationMode = false;
 
-		showTemplate = false;
-
 	}
 
 
@@ -741,8 +896,6 @@
 		recordHistory();
 
 		mapState = { ...mapState, polygons };
-
-		showTemplate = false;
 
 	}
 
@@ -800,6 +953,12 @@
 
 						weight: action.input.weight as number | undefined,
 
+						curvature: action.input.curvature as LineCurvature | undefined,
+
+						edgeType: action.input.edgeType as LineEdgeType | undefined,
+
+						snapToStreets: action.input.snapToStreets as boolean | undefined,
+
 						name: action.input.name as string | undefined
 
 					});
@@ -840,7 +999,134 @@
 
 					if (action.input.weight) drawWeight = Number(action.input.weight);
 
+					if (action.input.curvature) drawCurvature = action.input.curvature as LineCurvature;
+
+					if (action.input.edgeType) drawEdgeType = action.input.edgeType as LineEdgeType;
+
+					if (typeof action.input.snapToStreets === 'boolean') {
+						drawSnapToStreets = action.input.snapToStreets;
+					}
+
 					break;
+
+				case 'enable_edit_line_mode':
+
+					startEditLine();
+
+					break;
+
+				case 'disable_edit_line_mode':
+
+					editLineMode = false;
+
+					selectedLineId = null;
+
+					extendEnd = null;
+
+					break;
+
+				case 'select_line':
+
+					if (action.input.lineId) {
+
+						selectedLineId = String(action.input.lineId);
+
+						editLineMode = true;
+
+					}
+
+					break;
+
+				case 'set_line_rules': {
+
+					const lineId = action.input.lineId ? String(action.input.lineId) : null;
+
+					if (!lineId) break;
+
+					patchLineProperties(lineId, {
+
+						name: action.input.name as string | undefined,
+
+						curvature: action.input.curvature as LineCurvature | undefined,
+
+						edgeType: action.input.edgeType as LineEdgeType | undefined,
+
+						snapToStreets:
+							typeof action.input.snapToStreets === 'boolean'
+								? action.input.snapToStreets
+								: undefined,
+
+						color: action.input.color as string | undefined,
+
+						weight: action.input.weight as number | undefined
+
+					});
+
+					break;
+
+				}
+
+				case 'update_line': {
+
+					const lineId = action.input.lineId ? String(action.input.lineId) : null;
+
+					const raw = action.input.coordinates as unknown;
+
+					if (!lineId || !Array.isArray(raw) || raw.length < 2) break;
+
+					const coordinates = raw
+
+						.filter((c): c is [number, number] => Array.isArray(c) && c.length >= 2)
+
+						.map((c) => [Number(c[0]), Number(c[1])] as [number, number])
+
+						.filter(([lng, lat]) => Number.isFinite(lng) && Number.isFinite(lat));
+
+					if (coordinates.length < 2) break;
+
+					onLineGeometryChange(lineId, coordinates);
+
+					break;
+
+				}
+
+				case 'extend_line': {
+
+					const lineId = action.input.lineId ? String(action.input.lineId) : null;
+
+					const end = action.input.end === 'start' ? 'start' : 'end';
+
+					const raw = action.input.coordinates as unknown;
+
+					if (!lineId || !Array.isArray(raw) || raw.length < 1) break;
+
+					const extra = raw
+
+						.filter((c): c is [number, number] => Array.isArray(c) && c.length >= 2)
+
+						.map((c) => [Number(c[0]), Number(c[1])] as [number, number])
+
+						.filter(([lng, lat]) => Number.isFinite(lng) && Number.isFinite(lat));
+
+					if (extra.length === 0) break;
+
+					const collection = activeLineCollection(mapState, editingSchematicLines());
+
+					const feature = findLineFeature(collection, lineId);
+
+					if (!feature) break;
+
+					let coords = feature.geometry.coordinates as [number, number][];
+
+					for (const pt of extra) {
+						coords = extendLineEnd(coords, end, pt);
+					}
+
+					onLineGeometryChange(lineId, coords);
+
+					break;
+
+				}
 
 				case 'simplify_map':
 
@@ -909,8 +1195,6 @@
 						landcover: null
 
 					};
-
-					showTemplate = true;
 
 					break;
 
@@ -986,40 +1270,23 @@
 	/>
 
 	<div class="flex min-h-0 flex-1 overflow-hidden">
-		{#if showTemplate}
-			<aside
-				class="flex w-72 shrink-0 flex-col border-r border-slate-200 bg-slate-50 p-3 max-md:absolute max-md:z-10 max-md:h-full max-md:shadow-lg"
-			>
-				<div class="mb-2 flex items-center justify-between">
-					<h2 class="text-sm font-semibold text-slate-900">Template example</h2>
-					<button
-						type="button"
-						class="rounded-md border border-slate-200 px-2 py-0.5 text-xs text-slate-600 hover:bg-white"
-						onclick={() => (showTemplate = false)}
-					>
-						Hide
-					</button>
-				</div>
-				<LibraryImageCarousel images={data.templateImages} alt="Delhi metro map template" />
-				<p class="mt-2 text-xs text-slate-600">
-					Use the floating tool panels on the map for lines, stations, legend, and view options.
-				</p>
-			</aside>
-		{/if}
-
-		<div class="relative min-h-0 min-w-0 flex-1">
+		<div class="relative min-h-0 min-w-0 flex-1 overflow-hidden">
 			<div bind:this={captureSurface} class="absolute inset-0 z-0">
 				<MetroMapEditor
 					{mapState}
 					{mapSource}
 					{drawMode}
 					{stationMode}
+					{editLineMode}
+					{selectedLineId}
+					{extendEnd}
 					{viewMode}
 					{drawColor}
 					{drawStyleId}
 					{drawWeight}
 					{drawCurvature}
 					{drawEdgeType}
+					drawSnapToStreets={drawSnapToStreets}
 					{stationIconId}
 					stationSnapEnabled={stationSnapEnabled}
 					defaultStationName={pendingStationName}
@@ -1031,6 +1298,32 @@
 					onSimplifiedChange={onSimplifiedLinesChange}
 					onStationsChange={onStationsChange}
 					onPolygonsChange={onPolygonsChange}
+					onSelectLine={(id) => {
+						selectedLineId = id;
+						if (id) {
+							editLineMode = true;
+							segmentMenu = null;
+						} else {
+							extendEnd = null;
+							mapActionBanner = null;
+						}
+					}}
+					onLineGeometryChange={onLineGeometryChange}
+					onRequestExtend={(lineId, end) => startExtendLine(lineId, end)}
+					onVertexCornerRequest={(payload) => {
+						vertexCornerMenu = payload;
+						vertexCornerHistoryRecorded = false;
+						segmentMenu = null;
+					}}
+					onLineRulesRequest={(lineId) => {
+						lineRulesLineId = lineId;
+						lineRulesOpen = true;
+						segmentMenu = null;
+					}}
+					onSegmentMenu={(payload) => {
+						segmentMenu = payload;
+					}}
+					onVertexRoundnessChange={setVertexRoundness}
 					onMapMove={(center, zoom) => {
 						mapState = { ...mapState, center, zoom };
 					}}
@@ -1053,11 +1346,14 @@
 				<CityStylePanel
 					{drawMode}
 					{stationMode}
+					{editLineMode}
+					{selectedLineId}
 					{drawColor}
 					{drawStyleId}
 					{drawWeight}
 					{drawCurvature}
 					{drawEdgeType}
+					drawSnapToStreets={drawSnapToStreets}
 					{stationIconId}
 					stationName={pendingStationName}
 					snapEnabled={stationSnapEnabled}
@@ -1065,11 +1361,18 @@
 					onStopDraw={() => (drawMode = false)}
 					onStation={startStation}
 					onStopStation={() => (stationMode = false)}
+					onEditLine={startEditLine}
+					onStopEditLine={() => {
+						editLineMode = false;
+						selectedLineId = null;
+						extendEnd = null;
+					}}
 					onColorChange={(c) => (drawColor = c)}
 					onStyleChange={onStyleChange}
 					onWeightChange={(w) => (drawWeight = w)}
 					onCurvatureChange={(c) => (drawCurvature = c)}
 					onEdgeTypeChange={(e) => (drawEdgeType = e)}
+					onDrawSnapToStreetsChange={(v) => (drawSnapToStreets = v)}
 					onStationIconChange={(id) => (stationIconId = id)}
 					onStationNameChange={(n) => (pendingStationName = n)}
 					onSnapToggle={(v) => (stationSnapEnabled = v)}
@@ -1089,6 +1392,57 @@
 				onPickStationIcon={(id) => {
 					stationIconId = id;
 				}}
+			/>
+
+			<LineRulesModal
+				open={lineRulesOpen}
+				lineId={lineRulesLineId}
+				properties={linePropertiesFor(lineRulesLineId)}
+				onClose={() => {
+					lineRulesOpen = false;
+					lineRulesLineId = null;
+				}}
+				onSave={(lineId, patch) => patchLineProperties(lineId, patch)}
+			/>
+
+			<LineSegmentPopup
+				open={segmentMenu != null}
+				x={segmentMenu?.x ?? 0}
+				y={segmentMenu?.y ?? 0}
+				onClose={() => (segmentMenu = null)}
+				onAddPoint={insertSegmentPoint}
+				onExtendStart={() => segmentMenu && startExtendLine(segmentMenu.lineId, 'start')}
+				onExtendEnd={() => segmentMenu && startExtendLine(segmentMenu.lineId, 'end')}
+				onLineRules={() => {
+					if (!segmentMenu) return;
+					lineRulesLineId = segmentMenu.lineId;
+					lineRulesOpen = true;
+					segmentMenu = null;
+				}}
+			/>
+
+			<VertexCornerPopup
+				open={vertexCornerMenu != null}
+				x={vertexCornerMenu?.x ?? 0}
+				y={vertexCornerMenu?.y ?? 0}
+				vertexIndex={vertexCornerMenu?.vertexIndex ?? 0}
+				roundness={vertexCornerMenu?.roundness ?? 0}
+				onClose={() => {
+					vertexCornerMenu = null;
+					vertexCornerHistoryRecorded = false;
+				}}
+				onChange={(roundness) => {
+					if (!vertexCornerMenu) return;
+					if (!vertexCornerHistoryRecorded) {
+						recordHistory();
+						vertexCornerHistoryRecorded = true;
+					}
+					setVertexRoundness(vertexCornerMenu.lineId, vertexCornerMenu.vertexIndex, roundness, {
+						recordHistory: false
+					});
+					vertexCornerMenu = { ...vertexCornerMenu, roundness };
+				}}
+				onSave={saveVertexCorner}
 			/>
 
 			<FloatingPanel title="Shapes" open={openPanel === 'draw'} onClose={() => (openPanel = null)}>
@@ -1116,7 +1470,6 @@
 					onSchematic={() => setViewMode('schematic')}
 					onOsm={() => setMapSource('osm')}
 					onScratch={() => setMapSource('scratch')}
-					onSimplify={doSimplify}
 					onUndo={undo}
 					onClear={() => {
 						recordHistory();
@@ -1126,7 +1479,6 @@
 							simplifiedLines: null,
 							landcover: null
 						};
-						showTemplate = true;
 					}}
 					onClearStations={() => {
 						recordHistory();
@@ -1197,4 +1549,3 @@
 		/>
 	</div>
 </div>
-

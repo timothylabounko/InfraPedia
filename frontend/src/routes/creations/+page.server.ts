@@ -44,6 +44,14 @@ export const load: PageServerLoad = async ({ locals }) => {
 		}
 	}
 
+	const { data: profile } = await locals.supabase
+		.from('users')
+		.select('username, email')
+		.eq('id', locals.user.id)
+		.single();
+
+	const creatorName = profile?.username ?? profile?.email?.split('@')[0] ?? 'You';
+
 	const projects: LibraryProject[] = rows.map((row) => ({
 		id: row.id,
 		name: row.name,
@@ -51,8 +59,8 @@ export const load: PageServerLoad = async ({ locals }) => {
 		visibility: row.visibility,
 		isOwner: true,
 		project_types: row.project_types,
-		creatorEmail: locals.user!.email ?? '',
-		creatorName: locals.user!.email ?? 'You',
+		creatorEmail: profile?.email ?? locals.user!.email ?? '',
+		creatorName,
 		images: getProjectThumbnail(row.project_types?.slug, previewByProject[row.id])
 	}));
 

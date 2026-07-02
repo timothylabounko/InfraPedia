@@ -3,7 +3,22 @@
 	import type { LatLng, LatLngExpression, LayerGroup, Map, TileLayer } from 'leaflet';
 	import { getLineStyle } from '$lib/metro/line-styles';
 	import { applyCurvature, snapThresholdForZoom, snapWithAttachment } from '$lib/metro/snap-to-line';
+	import { initVertexRoundness } from '$lib/metro/line-curves';
 	import { captureMapPreview } from '$lib/metro/map-capture';
+	import {
+		extendLineEnd,
+		findLineFeature,
+		insertVertexAt,
+		pickSegmentAtPoint,
+		projectPointOnSegment,
+		vertexRoundnessForIndex
+	} from '$lib/metro/line-edit';
+	import {
+		fetchRoadSegments,
+		snapPointToStreets,
+		snapSegmentToStreets,
+		type RoadSegment
+	} from '$lib/metro/street-snap';
 	import { getStationIcon, STATION_ICON_ANCHOR, STATION_ICON_SIZE } from '$lib/metro/station-styles';
 	import type {
 		LandcoverGeoJSON,
@@ -29,6 +44,10 @@
 		drawWeight: number;
 		drawCurvature: import('$lib/metro/types').LineCurvature;
 		drawEdgeType: import('$lib/metro/types').LineEdgeType;
+		drawSnapToStreets: boolean;
+		editLineMode: boolean;
+		selectedLineId: string | null;
+		extendEnd: 'start' | 'end' | null;
 		stationIconId: string;
 		stationSnapEnabled: boolean;
 		defaultStationName: string;
@@ -40,6 +59,25 @@
 		onStationsChange: (stations: MetroStationsGeoJSON) => void;
 		onPolygonsChange: (polygons: MapPolygonsGeoJSON) => void;
 		onMapMove: (center: [number, number], zoom: number) => void;
+		onSelectLine: (lineId: string | null) => void;
+		onLineGeometryChange: (lineId: string, coordinates: [number, number][]) => void;
+		onLineRulesRequest: (lineId: string) => void;
+		onRequestExtend: (lineId: string, end: 'start' | 'end') => void;
+		onVertexCornerRequest: (payload: {
+			lineId: string;
+			vertexIndex: number;
+			roundness: number;
+			x: number;
+			y: number;
+		}) => void;
+		onVertexRoundnessChange: (lineId: string, vertexIndex: number, roundness: number) => void;
+		onSegmentMenu: (payload: {
+			lineId: string;
+			segmentIndex: number;
+			point: [number, number];
+			x: number;
+			y: number;
+		}) => void;
 		onMapReady?: (api: MapApi) => void;
 		getCaptureSurface?: () => HTMLElement | null;
 	};
@@ -55,6 +93,10 @@
 		drawWeight,
 		drawCurvature,
 		drawEdgeType,
+		drawSnapToStreets,
+		editLineMode,
+		selectedLineId,
+		extendEnd,
 		stationIconId,
 		stationSnapEnabled,
 		defaultStationName,
@@ -66,6 +108,13 @@
 		onStationsChange,
 		onPolygonsChange,
 		onMapMove,
+		onSelectLine,
+		onLineGeometryChange,
+		onLineRulesRequest,
+		onRequestExtend,
+		onVertexCornerRequest,
+		onVertexRoundnessChange,
+		onSegmentMenu,
 		onMapReady,
 		getCaptureSurface
 	}: Props = $props();
@@ -82,12 +131,43 @@
 	let polygonLayer: LayerGroup | null = null;
 	let draftLayer: LayerGroup | null = null;
 	let snapPreviewLayer: LayerGroup | null = null;
+	let hitLayer: LayerGroup | null = null;
+	let editLayer: LayerGroup | null = null;
+	let hitRenderer: import('leaflet').Renderer | null = null;
 	let currentLineCoords = $state<[number, number][]>([]);
 	let polygonDraft = $state<[number, number][]>([]);
 	let mapReady = $state(false);
 	let currentZoom = $state(11);
+	let roadSegments = $state<RoadSegment[]>([]);
+	let roadFetchBoundsKey = $state('');
+	let segmentDrag = $state<{
+		lineId: string;
+		segmentIndex: number;
+		startX: number;
+		startY: number;
+		point: [number, number];
+	} | null>(null);
+	let segmentDragPreview = $state<[number, number] | null>(null);
+	let suppressMapClick = false;
 
 	const isSchematic = $derived(viewMode === 'schematic' || mapSource === 'scratch');
+	const lineInteractionEnabled = $derived(!drawMode && !stationMode && !polygonMode);
+
+	/** Tracks line geometry + per-vertex roundness so map layers redraw on slider changes. */
+	const linesRenderRevision = $derived.by(() => {
+		let key = '';
+		for (const f of mapState.lines.features) {
+			key += `${f.properties.id}:${f.geometry.coordinates.length}:${JSON.stringify(f.properties.vertexRoundness ?? [])};`;
+		}
+		for (const f of mapState.simplifiedLines?.features ?? []) {
+			key += `s:${f.properties.id}:${f.geometry.coordinates.length}:${JSON.stringify(f.properties.vertexRoundness ?? [])};`;
+		}
+		return key;
+	});
+
+	function lineHitThreshold() {
+		return Math.max(30, 2500 / Math.pow(2, currentZoom - 10));
+	}
 
 	function lngLatToLeaflet(coord: [number, number]): LatLngExpression {
 		return [coord[1], coord[0]];
@@ -117,7 +197,9 @@
 			const props = feature.properties;
 			const preset = getLineStyle(props?.styleId ?? 'boston');
 			const curvature = props?.curvature ?? preset.curvature ?? 'straight';
-			const coords = applyCurvature(raw, curvature).map((c) => lngLatToLeaflet(c));
+			const coords = applyCurvature(raw, curvature, props?.vertexRoundness).map((c) =>
+				lngLatToLeaflet(c)
+			);
 			if (coords.length < 2) continue;
 
 			const color = props?.color ?? preset.color;
@@ -127,6 +209,7 @@
 			const lineJoin = props?.lineJoin ?? edgeToJoin(props?.edgeType ?? preset.edgeType);
 			const casingColor = props?.casingColor ?? preset.casingColor;
 			const casingExtra = props?.casingExtra ?? preset.casingExtra ?? 0;
+			const smoothFactor = props?.vertexRoundness?.some((v) => (v ?? 0) !== 0) ? 0 : 0.5;
 
 			if (casingColor && casingExtra > 0) {
 				L.polyline(coords, {
@@ -135,7 +218,7 @@
 					opacity,
 					lineCap,
 					lineJoin,
-					smoothFactor: curvature === 'smooth' ? 2 : 0.5
+					smoothFactor
 				}).addTo(group);
 			}
 
@@ -145,25 +228,33 @@
 				opacity,
 				lineCap,
 				lineJoin,
-				smoothFactor: curvature === 'smooth' ? 2 : 0.5,
+				smoothFactor,
 				...(dashArray ? { dashArray } : {})
 			}).addTo(group);
 		}
 	}
 
-	function drawLandcover(layer: LayerGroup | null, geojson: LandcoverGeoJSON['forests'], fill: string) {
+	function drawLandcover(
+		layer: LayerGroup | null,
+		geojson: LandcoverGeoJSON['forests'],
+		fill: string,
+		kind: 'forest' | 'water'
+	) {
 		if (!leafletApi || !layer) return;
 		const L = leafletApi;
 		clearLayerGroup(layer);
+
+		const fillOpacity = kind === 'forest' ? 0.28 : 0.42;
+		const strokeOpacity = kind === 'forest' ? 0.2 : 0.35;
 
 		for (const feature of geojson.features) {
 			const rings = feature.geometry.coordinates.map((ring) => ring.map((c) => lngLatToLeaflet(c)));
 			L.polygon(rings, {
 				color: fill,
 				fillColor: fill,
-				fillOpacity: 0.45,
-				weight: 1,
-				opacity: 0.6
+				fillOpacity,
+				weight: kind === 'water' ? 1.5 : 0.5,
+				opacity: strokeOpacity
 			}).addTo(layer);
 		}
 	}
@@ -212,8 +303,8 @@
 
 		const landcover = mapState.landcover;
 		if (isSchematic && landcover) {
-			drawLandcover(forestLayer, landcover.forests, '#b8e0b0');
-			drawLandcover(riverLayer, landcover.rivers, '#a8d4f0');
+			drawLandcover(forestLayer, landcover.forests, '#c8e6c0', 'forest');
+			drawLandcover(riverLayer, landcover.rivers, '#9ec9e8', 'water');
 		} else {
 			clearLayerGroup(forestLayer);
 			clearLayerGroup(riverLayer);
@@ -221,6 +312,8 @@
 
 		drawStations();
 		drawPolygonsOnLayer();
+
+		syncEditUi();
 
 		if (tileLayer) {
 			if (isSchematic && mapSource === 'osm') {
@@ -260,6 +353,7 @@
 
 	function lineProps() {
 		const style = getLineStyle(drawStyleId);
+		const curvature = drawCurvature ?? 'straight';
 		return {
 			id: newLineId(),
 			color: drawColor,
@@ -270,8 +364,9 @@
 			lineJoin: style.lineJoin,
 			casingColor: style.casingColor,
 			casingExtra: style.casingExtra,
-			curvature: drawCurvature ?? style.curvature,
-			edgeType: drawEdgeType ?? style.edgeType
+			curvature,
+			edgeType: drawEdgeType ?? style.edgeType,
+			snapToStreets: drawSnapToStreets
 		};
 	}
 
@@ -280,6 +375,403 @@
 			return mapState.simplifiedLines;
 		}
 		return mapState.lines;
+	}
+
+	function boundsKey() {
+		if (!map) return '';
+		const b = map.getBounds();
+		return `${b.getSouth().toFixed(2)},${b.getWest().toFixed(2)},${b.getNorth().toFixed(2)},${b.getEast().toFixed(2)}`;
+	}
+
+	async function ensureRoadSegments() {
+		if (!map) return;
+		const key = boundsKey();
+		if (roadSegments.length > 0 && roadFetchBoundsKey === key) return;
+		const b = map.getBounds();
+		roadFetchBoundsKey = key;
+		roadSegments = await fetchRoadSegments({
+			south: b.getSouth(),
+			west: b.getWest(),
+			north: b.getNorth(),
+			east: b.getEast()
+		});
+	}
+
+	function snapDrawPoint(lng: number, lat: number, useStreets: boolean): [number, number] {
+		if (!useStreets || roadSegments.length === 0) return [lng, lat];
+		const threshold = snapThresholdForZoom(currentZoom);
+		const snapped = snapPointToStreets(lng, lat, roadSegments, threshold);
+		return [snapped.lng, snapped.lat];
+	}
+
+	function appendDrawPoint(lng: number, lat: number) {
+		const useStreets = drawSnapToStreets;
+		if (useStreets) void ensureRoadSegments();
+
+		let pt = snapDrawPoint(lng, lat, useStreets && roadSegments.length > 0);
+		if (currentLineCoords.length > 0 && useStreets && roadSegments.length > 0) {
+			const prev = currentLineCoords[currentLineCoords.length - 1];
+			const seg = snapSegmentToStreets(prev, pt, roadSegments, snapThresholdForZoom(currentZoom));
+			pt = seg[seg.length - 1];
+			if (seg.length > 2) {
+				currentLineCoords = [...currentLineCoords, ...seg.slice(1)];
+				updateDraftLine();
+				return;
+			}
+		}
+		currentLineCoords = [...currentLineCoords, pt];
+		updateDraftLine();
+	}
+
+	function commitLineGeometry(lineId: string, coordinates: [number, number][]) {
+		if (coordinates.length < 2) return;
+		clearLayerGroup(draftLayer);
+		onLineGeometryChange(lineId, coordinates);
+	}
+
+	function drawHitPolylines(collection: MetroGeoJSON) {
+		if (!leafletApi || !hitLayer || !map || !hitRenderer) return;
+		const L = leafletApi;
+		clearLayerGroup(hitLayer);
+
+		if (!lineInteractionEnabled) return;
+
+		for (const feature of collection.features) {
+			const raw = feature.geometry.coordinates as [number, number][];
+			if (raw.length < 2) continue;
+			const lineId = feature.properties.id;
+			const isSelected = selectedLineId === lineId;
+
+			for (let i = 0; i < raw.length - 1; i++) {
+				const a = raw[i];
+				const b = raw[i + 1];
+				const coords = [lngLatToLeaflet(a), lngLatToLeaflet(b)];
+
+				const poly = L.polyline(coords, {
+					color: isSelected ? '#0284c7' : '#334155',
+					weight: isSelected ? 22 : 18,
+					opacity: 0.01,
+					lineCap: 'round',
+					interactive: true,
+					renderer: hitRenderer
+				}).addTo(hitLayer);
+
+				const segmentIndex = i;
+
+				poly.on('mousedown', (e) => {
+					if (!lineInteractionEnabled) return;
+					L.DomEvent.stopPropagation(e);
+					(e.originalEvent as MouseEvent).preventDefault?.();
+					const orig = e.originalEvent as MouseEvent;
+					const pt = leafletToLngLat(e.latlng);
+					const [px, py] = projectPointOnSegment(pt, a, b);
+					segmentDrag = {
+						lineId,
+						segmentIndex,
+						startX: orig.clientX,
+						startY: orig.clientY,
+						point: [px, py]
+					};
+					segmentDragPreview = [px, py];
+					onSelectLine(lineId);
+					map?.dragging.disable();
+				});
+
+				poly.on('contextmenu', (e) => {
+					L.DomEvent.stopPropagation(e);
+					(e.originalEvent as MouseEvent).preventDefault?.();
+					const pt = leafletToLngLat(e.latlng);
+					const [px, py] = projectPointOnSegment(pt, a, b);
+					const me = e.originalEvent as MouseEvent;
+					onSelectLine(lineId);
+					onSegmentMenu({
+						lineId,
+						segmentIndex,
+						point: [px, py],
+						x: me.clientX,
+						y: me.clientY
+					});
+				});
+
+				poly.on('dblclick', (e) => {
+					L.DomEvent.stopPropagation(e);
+					onSelectLine(lineId);
+					onLineRulesRequest(lineId);
+				});
+			}
+		}
+	}
+
+	function drawSelectedLineHighlight() {
+		if (!leafletApi || !editLayer || !selectedLineId) return;
+		const feature = findLineFeature(activeLines(), selectedLineId);
+		if (!feature) return;
+		const L = leafletApi;
+		const raw = feature.geometry.coordinates as [number, number][];
+		const props = feature.properties;
+		const preset = getLineStyle(props?.styleId ?? 'boston');
+		const curvature = props?.curvature ?? preset.curvature ?? 'straight';
+		const rendered = applyCurvature(raw, curvature, props?.vertexRoundness).map(lngLatToLeaflet);
+		L.polyline(rendered, {
+			color: '#0ea5e9',
+			weight: (props.weight ?? 4) + 6,
+			opacity: 0.25,
+			lineCap: 'round',
+			interactive: false,
+			smoothFactor: props?.vertexRoundness?.some((v) => Math.abs(v ?? 0) >= 0.5) ? 0 : 0.5
+		}).addTo(editLayer);
+	}
+
+	function previewLineStyle(feature?: { properties: import('$lib/metro/types').LineProperties }) {
+		const style = getLineStyle(feature?.properties.styleId ?? drawStyleId);
+		return {
+			color: feature?.properties.color ?? drawColor ?? style.color,
+			weight: feature?.properties.weight ?? drawWeight ?? style.weight,
+			curvature: feature?.properties.curvature ?? style.curvature ?? 'straight',
+			vertexRoundness: feature?.properties.vertexRoundness
+		};
+	}
+
+	function drawGeometryPreview(
+		coords: [number, number][],
+		opts?: {
+			color?: string;
+			weight?: number;
+			curvature?: import('$lib/metro/types').LineCurvature;
+			vertexRoundness?: number[];
+			dashArray?: string;
+		}
+	) {
+		if (!draftLayer || !leafletApi || coords.length < 2) return;
+		const L = leafletApi;
+		const curvature = opts?.curvature ?? 'straight';
+		const rendered = applyCurvature(coords, curvature, opts?.vertexRoundness).map(lngLatToLeaflet);
+		L.polyline(rendered, {
+			color: opts?.color ?? '#0ea5e9',
+			weight: opts?.weight ?? 4,
+			opacity: 0.88,
+			lineCap: 'round',
+			...(opts?.dashArray ? { dashArray: opts.dashArray } : {})
+		}).addTo(draftLayer);
+	}
+
+	function updateDrawPreview(latlng: LatLng) {
+		if (!draftLayer || !leafletApi || !drawMode) return;
+		const L = leafletApi;
+		clearLayerGroup(draftLayer);
+
+		const style = getLineStyle(drawStyleId);
+		let cursor = leafletToLngLat(latlng);
+		if (drawSnapToStreets && roadSegments.length > 0) {
+			const snapped = snapPointToStreets(
+				cursor[0],
+				cursor[1],
+				roadSegments,
+				snapThresholdForZoom(currentZoom)
+			);
+			cursor = [snapped.lng, snapped.lat];
+		}
+
+		if (currentLineCoords.length >= 1) {
+			L.polyline(currentLineCoords.map(lngLatToLeaflet), {
+				color: drawColor,
+				weight: drawWeight || style.weight,
+				opacity: 0.95,
+				lineCap: style.lineCap ?? 'round',
+				...(style.dashArray ? { dashArray: style.dashArray } : {})
+			}).addTo(draftLayer);
+
+			const last = currentLineCoords[currentLineCoords.length - 1];
+			L.polyline([lngLatToLeaflet(last), lngLatToLeaflet(cursor)], {
+				color: drawColor,
+				weight: Math.max(2, (drawWeight || style.weight) - 1),
+				opacity: 0.55,
+				lineCap: 'round',
+				dashArray: '8 6'
+			}).addTo(draftLayer);
+		}
+
+		L.circleMarker(lngLatToLeaflet(cursor), {
+			radius: 8,
+			color: drawColor,
+			fillColor: '#ffffff',
+			fillOpacity: 1,
+			weight: 3
+		}).addTo(draftLayer);
+	}
+
+	function updateVertexDragPreview(lineId: string, vertexIndex: number, lng: number, lat: number) {
+		if (!draftLayer || !leafletApi) return;
+		const feature = findLineFeature(activeLines(), lineId);
+		if (!feature) return;
+		clearLayerGroup(draftLayer);
+		const coords = [...(feature.geometry.coordinates as [number, number][])];
+		coords[vertexIndex] = [lng, lat];
+		const ps = previewLineStyle(feature);
+		drawGeometryPreview(coords, {
+			color: ps.color,
+			weight: ps.weight + 1,
+			curvature: ps.curvature,
+			vertexRoundness: ps.vertexRoundness,
+			dashArray: '6 4'
+		});
+	}
+	function updateSegmentDragPreview() {
+		if (!draftLayer || !leafletApi || !segmentDrag || !segmentDragPreview) return;
+		const feature = findLineFeature(activeLines(), segmentDrag.lineId);
+		if (!feature) return;
+		clearLayerGroup(draftLayer);
+		const coords = feature.geometry.coordinates as [number, number][];
+		const next = insertVertexAt(coords, segmentDrag.segmentIndex, segmentDragPreview);
+		const ps = previewLineStyle(feature);
+		drawGeometryPreview(next, {
+			color: ps.color,
+			weight: ps.weight + 1,
+			curvature: ps.curvature,
+			vertexRoundness: ps.vertexRoundness,
+			dashArray: '6 4'
+		});
+		const L = leafletApi;
+		L.circleMarker(lngLatToLeaflet(segmentDragPreview), {
+			radius: 7,
+			color: '#0ea5e9',
+			fillColor: '#fff',
+			fillOpacity: 1,
+			weight: 2
+		}).addTo(draftLayer);
+	}
+
+	function drawEditHandles() {
+		if (!leafletApi || !editLayer) return;
+		const L = leafletApi;
+		clearLayerGroup(editLayer);
+
+		if (!selectedLineId || !lineInteractionEnabled) return;
+
+		drawSelectedLineHighlight();
+
+		const feature = findLineFeature(activeLines(), selectedLineId);
+		if (!feature) return;
+
+		const coords = feature.geometry.coordinates as [number, number][];
+		const useStreets = feature.properties.snapToStreets ?? false;
+		const lineId = selectedLineId;
+
+		for (let i = 0; i < coords.length; i++) {
+			const [lng, lat] = coords[i];
+			const isEndpoint = i === 0 || i === coords.length - 1;
+			const end = i === 0 ? 'start' : 'end';
+			const icon = L.divIcon({
+				className: 'line-vertex-handle-wrap',
+				html: isEndpoint
+					? `<span class="line-vertex-handle line-vertex-end" title="Drag to move or extend">+</span>`
+					: `<span class="line-vertex-handle" title="Drag to move, click to round this corner"></span>`,
+				iconSize: isEndpoint ? [22, 22] : [16, 16],
+				iconAnchor: isEndpoint ? [11, 11] : [8, 8]
+			});
+			const marker = L.marker([lat, lng], {
+				icon,
+				draggable: true,
+				zIndexOffset: isEndpoint ? 1000 : 500
+			}).addTo(editLayer);
+
+			let endpointDragged = false;
+			if (isEndpoint) {
+				marker.on('dragstart', () => {
+					endpointDragged = false;
+				});
+				marker.on('drag', () => {
+					endpointDragged = true;
+					const ll = marker.getLatLng();
+					updateVertexDragPreview(lineId, i, ll.lng, ll.lat);
+				});
+				marker.on('click', (e) => {
+					if (endpointDragged) {
+						endpointDragged = false;
+						return;
+					}
+					L.DomEvent.stopPropagation(e);
+					onRequestExtend(lineId, end as 'start' | 'end');
+				});
+			} else {
+				let interiorDragged = false;
+				marker.on('dragstart', () => {
+					interiorDragged = false;
+				});
+				marker.on('drag', () => {
+					interiorDragged = true;
+					const ll = marker.getLatLng();
+					updateVertexDragPreview(lineId, i, ll.lng, ll.lat);
+				});
+				marker.on('click', (e) => {
+					if (interiorDragged) {
+						interiorDragged = false;
+						return;
+					}
+					L.DomEvent.stopPropagation(e);
+					const me = (e.originalEvent as MouseEvent) ?? { clientX: 0, clientY: 0 };
+					onVertexCornerRequest({
+						lineId,
+						vertexIndex: i,
+						roundness: vertexRoundnessForIndex(feature.properties, i, coords.length),
+						x: me.clientX,
+						y: me.clientY
+					});
+				});
+			}
+
+			marker.on('dragend', () => {
+				clearLayerGroup(draftLayer);
+				const ll = marker.getLatLng();
+				let nextLng = ll.lng;
+				let nextLat = ll.lat;
+				if (useStreets && roadSegments.length > 0) {
+					const snapped = snapPointToStreets(nextLng, nextLat, roadSegments, snapThresholdForZoom(currentZoom));
+					nextLng = snapped.lng;
+					nextLat = snapped.lat;
+					marker.setLatLng([nextLat, nextLng]);
+				}
+				const fresh = findLineFeature(activeLines(), lineId);
+				if (!fresh) return;
+				const nextCoords = [...(fresh.geometry.coordinates as [number, number][])];
+				nextCoords[i] = [nextLng, nextLat];
+				commitLineGeometry(lineId, nextCoords);
+			});
+		}
+	}
+
+	function updateExtendPreview(latlng: LatLng) {
+		if (!draftLayer || !leafletApi || !extendEnd || !selectedLineId) return;
+		const feature = findLineFeature(activeLines(), selectedLineId);
+		if (!feature) return;
+		const L = leafletApi;
+		const coords = feature.geometry.coordinates as [number, number][];
+		let pt = leafletToLngLat(latlng);
+		if (feature.properties.snapToStreets && roadSegments.length > 0) {
+			const snapped = snapPointToStreets(pt[0], pt[1], roadSegments, snapThresholdForZoom(currentZoom));
+			pt = [snapped.lng, snapped.lat];
+		}
+		const anchor = extendEnd === 'start' ? coords[0] : coords[coords.length - 1];
+		clearLayerGroup(draftLayer);
+		L.polyline([lngLatToLeaflet(anchor), lngLatToLeaflet(pt)], {
+			color: '#0ea5e9',
+			weight: 3,
+			opacity: 0.85,
+			dashArray: '6 4'
+		}).addTo(draftLayer);
+		L.circleMarker(lngLatToLeaflet(pt), {
+			radius: 6,
+			color: '#0ea5e9',
+			fillColor: '#fff',
+			fillOpacity: 1,
+			weight: 2
+		}).addTo(draftLayer);
+	}
+
+	function syncEditUi() {
+		const collection = activeLines();
+		drawHitPolylines(collection);
+		drawEditHandles();
 	}
 
 	function resolveStationPoint(lng: number, lat: number, shiftKey: boolean) {
@@ -300,9 +792,15 @@
 			return;
 		}
 
+		const props = lineProps();
+		const vertexRoundness =
+			props.curvature !== 'straight'
+				? initVertexRoundness(currentLineCoords.length, props.curvature)
+				: undefined;
+
 		const feature = {
 			type: 'Feature' as const,
-			properties: lineProps(),
+			properties: { ...props, vertexRoundness },
 			geometry: { type: 'LineString' as const, coordinates: [...currentLineCoords] }
 		};
 
@@ -322,6 +820,7 @@
 
 		currentLineCoords = [];
 		clearLayerGroup(draftLayer);
+		onSelectLine(feature.properties.id);
 	}
 
 	function addStationAt(
@@ -484,23 +983,22 @@
 
 	function updateDraftLine() {
 		if (!draftLayer || !leafletApi) return;
-		const L = leafletApi;
-
 		clearLayerGroup(draftLayer);
 		if (currentLineCoords.length < 1) return;
-
 		const style = getLineStyle(drawStyleId);
+		const L = leafletApi;
 		L.polyline(currentLineCoords.map(lngLatToLeaflet), {
 			color: drawColor,
 			weight: drawWeight || style.weight,
-			opacity: 0.9,
+			opacity: 0.95,
 			lineCap: style.lineCap ?? 'round',
-			dashArray: style.dashArray ?? '6 4'
+			...(style.dashArray ? { dashArray: style.dashArray } : {})
 		}).addTo(draftLayer);
 	}
 
 	onMount(() => {
 		let cancelled = false;
+		let onWindowKey: ((e: KeyboardEvent) => void) | null = null;
 
 		void (async () => {
 			const [leaflet] = await Promise.all([
@@ -531,6 +1029,9 @@
 			polygonLayer = L.layerGroup().addTo(map);
 			draftLayer = L.layerGroup().addTo(map);
 			snapPreviewLayer = L.layerGroup().addTo(map);
+			hitLayer = L.layerGroup().addTo(map);
+			editLayer = L.layerGroup().addTo(map);
+			hitRenderer = L.svg({ padding: 0.5 });
 
 			applyMapSource(mapSource);
 			syncLayers();
@@ -559,6 +1060,10 @@
 			});
 
 			map.on('click', (e) => {
+				if (suppressMapClick) {
+					suppressMapClick = false;
+					return;
+				}
 				const shift = !!(e.originalEvent as MouseEvent)?.shiftKey;
 				const pt = leafletToLngLat(e.latlng);
 
@@ -587,19 +1092,101 @@
 					clearLayerGroup(snapPreviewLayer);
 					return;
 				}
+
+				if (selectedLineId && extendEnd) {
+					L.DomEvent.stopPropagation(e);
+					const feature = findLineFeature(activeLines(), selectedLineId);
+					if (!feature) return;
+					const useStreets = feature.properties.snapToStreets ?? false;
+					if (useStreets) void ensureRoadSegments();
+					let point = snapDrawPoint(pt[0], pt[1], useStreets && roadSegments.length > 0);
+					const coords = feature.geometry.coordinates as [number, number][];
+					const next = extendLineEnd(coords, extendEnd, point);
+					commitLineGeometry(selectedLineId, next);
+					return;
+				}
+
+				if (lineInteractionEnabled) {
+					const picked = pickSegmentAtPoint(
+						activeLines(),
+						pt[0],
+						pt[1],
+						lineHitThreshold()
+					);
+					if (picked) {
+						L.DomEvent.stopPropagation(e);
+						onSelectLine(picked.lineId);
+						return;
+					}
+					if (selectedLineId) {
+						onSelectLine(null);
+					}
+				}
+
 				if (!drawMode) return;
 				L.DomEvent.stopPropagation(e);
-				currentLineCoords = [...currentLineCoords, pt];
-				updateDraftLine();
+				if (drawSnapToStreets) void ensureRoadSegments();
+				appendDrawPoint(pt[0], pt[1]);
 			});
 
 			map.on('mousemove', (e) => {
+				if (drawMode) {
+					updateDrawPreview(e.latlng);
+				}
 				if (stationMode) {
 					updateSnapPreview(e.latlng, !!(e.originalEvent as MouseEvent)?.shiftKey);
 				}
+				if (segmentDrag) {
+					let pt = leafletToLngLat(e.latlng);
+					const feature = findLineFeature(activeLines(), segmentDrag.lineId);
+					if (feature?.properties.snapToStreets && roadSegments.length > 0) {
+						const snapped = snapPointToStreets(pt[0], pt[1], roadSegments, snapThresholdForZoom(currentZoom));
+						pt = [snapped.lng, snapped.lat];
+					}
+					segmentDragPreview = pt;
+					updateSegmentDragPreview();
+				} else if (extendEnd && selectedLineId) {
+					updateExtendPreview(e.latlng);
+				}
+			});
+
+			map.on('mouseup', (e) => {
+				if (!segmentDrag) return;
+				const drag = segmentDrag;
+				const me = e.originalEvent as MouseEvent;
+				const moved = Math.hypot(me.clientX - drag.startX, me.clientY - drag.startY);
+				map?.dragging.enable();
+				suppressMapClick = true;
+
+				if (moved > 5 && segmentDragPreview) {
+					const feature = findLineFeature(activeLines(), drag.lineId);
+					if (feature) {
+						const coords = feature.geometry.coordinates as [number, number][];
+						const next = insertVertexAt(coords, drag.segmentIndex, segmentDragPreview);
+						commitLineGeometry(drag.lineId, next);
+					}
+				} else {
+					const feature = findLineFeature(activeLines(), drag.lineId);
+					if (feature) {
+						const coords = feature.geometry.coordinates as [number, number][];
+						const next = insertVertexAt(coords, drag.segmentIndex, drag.point);
+						commitLineGeometry(drag.lineId, next);
+					}
+				}
+
+				segmentDrag = null;
+				segmentDragPreview = null;
+				clearLayerGroup(draftLayer);
 			});
 
 			map.on('mouseout', () => clearLayerGroup(snapPreviewLayer));
+
+			onWindowKey = (e: KeyboardEvent) => {
+				if (e.key === 'Escape' && selectedLineId) {
+					onSelectLine(null);
+				}
+			};
+			window.addEventListener('keydown', onWindowKey);
 
 			map.on('dblclick', (e) => {
 				if (polygonMode && polygonShape === 'polygon') {
@@ -626,6 +1213,7 @@
 
 		return () => {
 			cancelled = true;
+			if (onWindowKey) window.removeEventListener('keydown', onWindowKey);
 			map?.remove();
 			map = null;
 			tileLayer = null;
@@ -637,6 +1225,8 @@
 			polygonLayer = null;
 			draftLayer = null;
 			snapPreviewLayer = null;
+			hitLayer = null;
+			editLayer = null;
 			leafletApi = null;
 			mapReady = false;
 		};
@@ -647,7 +1237,16 @@
 	});
 
 	$effect(() => {
+		void linesRenderRevision;
 		if (mapReady && map) syncLayers();
+	});
+
+	$effect(() => {
+		void linesRenderRevision;
+		void selectedLineId;
+		if (mapReady && map) {
+			syncEditUi();
+		}
 	});
 
 	$effect(() => {
@@ -826,5 +1425,34 @@
 		color: #1e293b;
 		text-shadow: 0 0 3px #fff, 0 0 3px #fff;
 		pointer-events: none;
+	}
+
+	:global(.line-vertex-handle-wrap) {
+		background: transparent !important;
+		border: none !important;
+	}
+
+	:global(.line-vertex-handle) {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 14px;
+		height: 14px;
+		border-radius: 50%;
+		background: #fff;
+		border: 2px solid #0ea5e9;
+		box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+		font-size: 14px;
+		font-weight: 700;
+		line-height: 1;
+		color: #0f172a;
+	}
+
+	:global(.line-vertex-handle.line-vertex-end) {
+		border-color: #0f172a;
+		width: 22px;
+		height: 22px;
+		font-size: 16px;
+		background: #f0f9ff;
 	}
 </style>

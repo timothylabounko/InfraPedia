@@ -114,6 +114,8 @@ export const actions: Actions = {
 			return fail(500, { error: authError.message });
 		}
 
+		await locals.supabase.auth.refreshSession();
+
 		return { success: true };
 	}
 };

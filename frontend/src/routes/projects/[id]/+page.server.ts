@@ -3,7 +3,6 @@ import type { PageServerLoad } from './$types';
 import type { Json } from '$lib/supabase/database.types';
 import { DEFAULT_LEGEND, type MapLegendSettings, type ProjectMapState, type SharingSettings } from '$lib/metro/types';
 import { emptyMetroGeoJSON, emptyStationsGeoJSON, emptyPolygonsGeoJSON } from '$lib/metro/simplify';
-import { metroMapTemplateImages } from '$lib/data/planning-projects';
 
 export const load: PageServerLoad = async ({ params, locals }) => {
 	if (!locals.user) {
@@ -123,7 +122,6 @@ export const load: PageServerLoad = async ({ params, locals }) => {
 			status: row.status,
 			isOwner
 		},
-		templateImages: metroMapTemplateImages,
 		mapState,
 		sharing,
 		chatHistory: chatHistory ?? []

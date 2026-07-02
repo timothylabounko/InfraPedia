@@ -7,7 +7,6 @@
 		onSchematic: () => void;
 		onOsm: () => void;
 		onScratch: () => void;
-		onSimplify: () => void;
 		onUndo: () => void;
 		onClear: () => void;
 		onClearStations: () => void;
@@ -21,7 +20,6 @@
 		onSchematic,
 		onOsm,
 		onScratch,
-		onSimplify,
 		onUndo,
 		onClear,
 		onClearStations
@@ -42,8 +40,11 @@
 			}}
 		>
 			<option value="geographic">Geographic</option>
-			<option value="schematic">Schematic (white + landcover)</option>
+			<option value="schematic">Schematic (simplified lines + landcover)</option>
 		</select>
+		<p class="mt-1 text-[10px] text-slate-500">
+			Schematic view simplifies lines to 45°/90° angles and shows faded forest and water polygons.
+		</p>
 	</label>
 
 	<label class="block">
@@ -61,15 +62,6 @@
 			<option value="scratch">Blank grid</option>
 		</select>
 	</label>
-
-	<button
-		type="button"
-		data-highlight-id="simplify_map"
-		class="h-9 w-full rounded-md border border-slate-300 text-sm hover:bg-slate-50"
-		onclick={onSimplify}
-	>
-		Simplify map
-	</button>
 
 	<div class="grid grid-cols-2 gap-2">
 		<button

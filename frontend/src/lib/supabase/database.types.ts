@@ -177,6 +177,60 @@ export interface Database {
 				};
 				Relationships: [];
 			};
+			forum_posts: {
+				Row: {
+					id: string;
+					subject_slug: string;
+					user_id: string;
+					title: string | null;
+					body: string;
+					rating: number | null;
+					created_at: string;
+				};
+				Insert: {
+					id?: string;
+					subject_slug: string;
+					user_id: string;
+					title?: string | null;
+					body: string;
+					rating?: number | null;
+					created_at?: string;
+				};
+				Update: {
+					id?: string;
+					subject_slug?: string;
+					user_id?: string;
+					title?: string | null;
+					body?: string;
+					rating?: number | null;
+					created_at?: string;
+				};
+				Relationships: [];
+			};
+			forum_votes: {
+				Row: {
+					id: string;
+					post_id: string;
+					user_id: string;
+					value: number;
+					created_at: string;
+				};
+				Insert: {
+					id?: string;
+					post_id: string;
+					user_id: string;
+					value: number;
+					created_at?: string;
+				};
+				Update: {
+					id?: string;
+					post_id?: string;
+					user_id?: string;
+					value?: number;
+					created_at?: string;
+				};
+				Relationships: [];
+			};
 		};
 		Views: Record<string, never>;
 		Functions: Record<string, never>;

@@ -14,8 +14,13 @@ Available tools:
 - draw_line: draw a line with coordinates [[lng,lat],...] — use for "draw a line from A to B"
 - add_station: place a station at lat/lng with optional name and iconId (circle, square, diamond, interchange, terminal)
 - enable_draw_mode / disable_draw_mode: toggle manual line drawing
+- enable_edit_line_mode / disable_edit_line_mode: toggle line editing (drag vertices, extend, insert points)
+- select_line: select a line by lineId for editing
+- set_line_rules: set corner rounding (curvature), edge style, snapToStreets, name on an existing line
+- update_line: replace all coordinates of a line by lineId
+- extend_line: append or prepend coordinates to a line (end: start|end)
 - enable_station_mode / disable_station_mode: toggle click-to-add stations
-- set_draw_style: set color, styleId (boston/nyc/delhi/london/paris/tokyo/dc), weight (2-8)
+- set_draw_style: set color, styleId (boston/nyc/delhi/london/paris/tokyo/dc), weight (2-8), curvature, edgeType, snapToStreets for new lines
 - simplify_map: schematic view with white background, forest green and river blue polygons
 - set_view_mode: geographic or schematic
 - set_map_source: osm or scratch

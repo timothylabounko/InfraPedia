@@ -239,9 +239,9 @@ export const LINE_COLOR_SWATCHES = [
 ];
 
 export const CURVATURE_OPTIONS: { value: LineCurvature; label: string }[] = [
-	{ value: 'straight', label: 'Straight (schematic)' },
-	{ value: 'gentle', label: 'Gentle curves' },
-	{ value: 'smooth', label: 'Smooth (Tokyo-style)' }
+	{ value: 'straight', label: 'Sharp corners (default)' },
+	{ value: 'gentle', label: 'Rounded corners' },
+	{ value: 'smooth', label: 'Fully rounded corners' }
 ];
 
 export const EDGE_TYPE_OPTIONS: { value: LineEdgeType; label: string }[] = [

@@ -16,7 +16,8 @@ export const load: PageServerLoad = async ({ params, locals, url }) => {
 		redirect(303, '/templates/metro-map');
 	}
 
-	const result = await createMetroMapProject(locals.user, title);
+	const mapSource = url.searchParams.get('map_source') === 'scratch' ? 'scratch' : 'osm';
+	const result = await createMetroMapProject(locals.user, title, mapSource);
 
 	if ('error' in result) {
 		error(500, result.error);
