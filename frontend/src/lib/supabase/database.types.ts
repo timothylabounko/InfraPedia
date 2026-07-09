@@ -207,6 +207,33 @@ export interface Database {
 				};
 				Relationships: [];
 			};
+			forum_subjects: {
+				Row: {
+					id: string;
+					slug: string;
+					title: string;
+					description: string | null;
+					created_by: string | null;
+					created_at: string;
+				};
+				Insert: {
+					id?: string;
+					slug: string;
+					title: string;
+					description?: string | null;
+					created_by?: string | null;
+					created_at?: string;
+				};
+				Update: {
+					id?: string;
+					slug?: string;
+					title?: string;
+					description?: string | null;
+					created_by?: string | null;
+					created_at?: string;
+				};
+				Relationships: [];
+			};
 			forum_votes: {
 				Row: {
 					id: string;

@@ -1,7 +1,7 @@
 <script lang="ts">
-	import BackButton from '$lib/components/BackButton.svelte';
 	import CreateProjectBar from '$lib/components/metro/CreateProjectBar.svelte';
 	import LibraryImageCarousel from '$lib/components/LibraryImageCarousel.svelte';
+	import PageColumnBand from '$lib/components/PageColumnBand.svelte';
 	import type { MapSource } from '$lib/metro/types';
 	import type { ActionData, PageData } from './$types';
 
@@ -12,20 +12,16 @@
 </script>
 
 <main class="flex min-h-0 flex-1 flex-col overflow-hidden">
-	<div class="flex shrink-0 items-center gap-3 border-b border-slate-200 bg-white px-4 py-3">
-		<BackButton />
-		<div class="min-w-0 flex-1">
-			<p class="text-xs font-medium uppercase tracking-wide text-slate-500">Template</p>
-			<h1 class="truncate text-xl font-bold text-slate-900">{data.title}</h1>
-			<p class="text-xs text-slate-500">by InfraPedia</p>
-		</div>
-		<a
-			href={data.forumHref}
-			class="shrink-0 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 hover:bg-slate-50"
-		>
-			Community forum
-		</a>
-	</div>
+	<PageColumnBand tone="red" eyebrow="Template" title={data.title} subtitle="by InfraPedia">
+		{#snippet actions()}
+			<a
+				href={data.forumHref}
+				class="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 hover:bg-slate-50"
+			>
+				Community forum
+			</a>
+		{/snippet}
+	</PageColumnBand>
 
 	<CreateProjectBar error={form?.error ?? null}>
 		<form method="POST" action="?/create" class="flex w-full flex-col gap-4">

@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Singapore Food Journey</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <link rel="stylesheet" href="./infra-embed.css" />
+  </head>
+<body>
+    <div id="map"></div>
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <script src="script.js"></script>
+<script type="module">
+import { initInfraBridge } from './infraEmbed.js';
+
+function exportFoodState() {
+  const mapObj = window.__foodMap;
+  return {
+    center: mapObj ? [mapObj.getCenter().lat, mapObj.getCenter().lng] : [1.3521, 103.8198],
+    zoom: mapObj ? mapObj.getZoom() : 12,
+    ratings: JSON.parse(localStorage.getItem('foodRatings') || '{}'),
+    filterFood: document.querySelector('select')?.value || '',
+    customPlaces: JSON.parse(localStorage.getItem('customFoodPlaces') || '[]')
+  };
+}
+
+function importFoodState(state) {
+  if (!state || typeof state !== 'object') return;
+  if (state.ratings) localStorage.setItem('foodRatings', JSON.stringify(state.ratings));
+  if (state.customPlaces) localStorage.setItem('customFoodPlaces', JSON.stringify(state.customPlaces));
+  sessionStorage.setItem('infraFoodRestore', JSON.stringify({ center: state.center, zoom: state.zoom, filterFood: state.filterFood }));
+  location.reload();
+}
+
+initInfraBridge(exportFoodState, importFoodState);
+</script>    <script type="module" src="./infraBridgeBoot.js"></script>
+  </body>
+</html>

@@ -40,11 +40,12 @@ export const POST: RequestHandler = async ({ request, locals, params }) => {
 	}
 
 	const body = await request.json();
-	const { mapState, name, sharing, previewImage } = body as {
+	const { mapState, name, sharing, previewImage, apiConfig } = body as {
 		mapState: unknown;
 		name?: string;
 		sharing?: SharingSettings;
 		previewImage?: string;
+		apiConfig?: unknown;
 	};
 
 	if (!mapState) {
@@ -97,6 +98,17 @@ export const POST: RequestHandler = async ({ request, locals, params }) => {
 
 	if (mapError) {
 		return json({ error: mapError.message }, { status: 500 });
+	}
+
+	if (apiConfig) {
+		await admin.from('project_data').upsert(
+			{
+				project_id: params.id,
+				key: 'api_config',
+				value: apiConfig as unknown as Json
+			},
+			{ onConflict: 'project_id,key' }
+		);
 	}
 
 	if (isValidPreviewImage(previewImage)) {

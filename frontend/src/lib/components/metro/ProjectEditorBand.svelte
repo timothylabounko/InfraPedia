@@ -15,6 +15,9 @@
 		onRequireApprovalChange: (v: boolean) => void;
 		onSave: () => void;
 		tone: 'red' | 'yellow';
+		showApiSetup?: boolean;
+		onApiSetupClick?: () => void;
+		apiSetupWarning?: boolean;
 	};
 
 	let {
@@ -29,7 +32,10 @@
 		onCollaboratorEmailsChange,
 		onRequireApprovalChange,
 		onSave,
-		tone
+		tone,
+		showApiSetup = false,
+		onApiSetupClick,
+		apiSetupWarning = false
 	}: Props = $props();
 
 	const toneClass = $derived(tone === 'yellow' ? 'bg-yellow-100' : 'bg-red-100');
@@ -53,6 +59,16 @@
 	</div>
 
 	<div class="ml-auto flex shrink-0 flex-nowrap items-center gap-2">
+		{#if showApiSetup && onApiSetupClick}
+			<button
+				type="button"
+				class="{controlClass} font-medium hover:bg-slate-50 {apiSetupWarning ? 'border-amber-400 bg-amber-50' : ''}"
+				onclick={onApiSetupClick}
+			>
+				APIs
+			</button>
+		{/if}
+
 		<button
 			type="button"
 			data-highlight-id="save_project"

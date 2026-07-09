@@ -1,6 +1,7 @@
 import { error, redirect } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
 import type { Json } from '$lib/supabase/database.types';
+import { isMapTemplateSlug } from '$lib/data/template-registry';
 import { DEFAULT_LEGEND, type MapLegendSettings, type ProjectMapState, type SharingSettings } from '$lib/metro/types';
 import { emptyMetroGeoJSON, emptyStationsGeoJSON, emptyPolygonsGeoJSON } from '$lib/metro/simplify';
 
@@ -30,8 +31,12 @@ export const load: PageServerLoad = async ({ params, locals }) => {
 	};
 
 	const slug = row.project_types?.slug;
+	if (isMapTemplateSlug(slug) && slug !== 'metro-map') {
+		redirect(303, `/projects/${params.id}/map`);
+	}
+
 	if (slug !== 'metro-map') {
-		error(404, 'This editor is only available for Metro Map projects');
+		error(404, 'This editor is only available for map template projects');
 	}
 
 	const isOwner = row.owner_id === locals.user.id;

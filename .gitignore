@@ -1,5 +1,6 @@
 .venv/
 __pycache__/
+**/__pycache__/
 *.py[cod]
 *.sqlite3
 db.sqlite3
@@ -8,3 +9,8 @@ db.sqlite3
 .env
 backend/.env
 frontend/.env
+
+# Local runtime / generated
+backend/cache/
+frontend/node_modules/
+frontend/.svelte-kit/

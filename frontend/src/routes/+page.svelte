@@ -2,6 +2,8 @@
 	import AuthButton from '$lib/components/AuthButton.svelte';
 	import LibraryBox from '$lib/components/LibraryBox.svelte';
 	import LibraryColumn from '$lib/components/LibraryColumn.svelte';
+	import { isMapTemplateSlug } from '$lib/data/template-registry';
+	import { projectEditorHref } from '$lib/utils/template-links';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
@@ -42,8 +44,8 @@
 					creatorName={project.creatorName}
 					description={project.description ?? undefined}
 					subtitle={project.project_types?.name ?? 'Post'}
-					href={project.project_types?.slug === 'metro-map' ? `/projects/${project.id}` : undefined}
-					comingSoon={project.project_types?.slug !== 'metro-map'}
+					href={projectEditorHref(project.project_types?.slug, project.id)}
+					comingSoon={!isMapTemplateSlug(project.project_types?.slug)}
 					images={project.images}
 					openLabel="Open post"
 				/>
@@ -51,12 +53,15 @@
 		</LibraryColumn>
 
 		<LibraryColumn title="Create" tone="blue">
-			{#each data.createActions as action}
+			{#each data.createActions as action (action.id)}
 				<LibraryBox
 					title={action.title}
+					creatorName="Community"
 					description={action.description}
-					subtitle={action.kind}
-					images={[]}
+					subtitle={action.subtitle}
+					href={action.href}
+					images={action.images}
+					openLabel={action.subtitle === 'Template' ? 'Create template' : 'Create forum'}
 				/>
 			{/each}
 		</LibraryColumn>

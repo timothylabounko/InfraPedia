@@ -1,6 +1,8 @@
 <script lang="ts">
 	import LibraryBox from '$lib/components/LibraryBox.svelte';
 	import ProjectCoverModal from '$lib/components/ProjectCoverModal.svelte';
+	import { isMapTemplateSlug } from '$lib/data/template-registry';
+	import { projectEditorHref } from '$lib/utils/template-links';
 	import { visibilityLabel, visibilityTheme } from '$lib/utils/project-visibility';
 	import type { LibraryProject } from '$lib/types/library';
 	import type { PageData } from './$types';
@@ -175,10 +177,8 @@
 					visibilityLabel={visibilityLabel(project.visibility)}
 					href={selectMode
 						? undefined
-						: project.project_types?.slug === 'metro-map'
-							? `/projects/${project.id}`
-							: undefined}
-					comingSoon={!selectMode && project.project_types?.slug !== 'metro-map'}
+						: projectEditorHref(project.project_types?.slug, project.id)}
+					comingSoon={!selectMode && !isMapTemplateSlug(project.project_types?.slug)}
 					images={project.images}
 					openLabel="Open project"
 					selectable={selectMode}

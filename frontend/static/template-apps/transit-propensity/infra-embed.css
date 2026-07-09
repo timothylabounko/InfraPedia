@@ -1,0 +1,51 @@
+html.infra-embedded,
+html.infra-embedded body,
+html.infra-embedded .page {
+	background: #f8fafc;
+}
+
+html.infra-embedded .site-header {
+	display: none !important;
+}
+
+html.infra-embedded .page {
+	height: 100svh;
+}
+
+html.infra-embedded .map-section,
+html.infra-embedded .leaflet-container {
+	background: #f8fafc !important;
+}
+
+html.infra-embedded .chat-pane {
+	background: #0a0a0a;
+	border-right: 1px solid #333;
+}
+
+html.infra-embedded .chat-pane .chat-input,
+html.infra-embedded .chat-pane .chat-message.user {
+	border-color: #10e0f0;
+}
+
+html.infra-embedded .chat-pane .chat-message.assistant {
+	color: #f13193;
+}
+
+html.infra-embedded .map-hint,
+html.infra-embedded .loading-overlay {
+	background: rgba(248, 250, 252, 0.92);
+	color: #0f172a;
+}
+
+/* Keep Leaflet +/- zoom on the right so it never overlaps left-side UI. */
+.leaflet-control-container .leaflet-top.leaflet-right .leaflet-control-zoom {
+	margin-top: 10px;
+	margin-right: 10px;
+}
+
+/* Transit draw toolbar sits below zoom when both are top-right. */
+html.infra-embedded .map-draw-toolbar {
+	top: 76px !important;
+	right: 16px !important;
+	left: auto !important;
+}

@@ -1,18 +1,42 @@
-import { fail, error } from '@sveltejs/kit';
+import { error, fail } from '@sveltejs/kit';
 import { createForumPost, loadForumFeed, voteForumPost } from '$lib/server/forum';
+import { getTemplateConfig } from '$lib/data/template-registry';
 import { planningProjectLibrary } from '$lib/data/planning-projects';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ params, locals }) => {
-	const template = planningProjectLibrary.find((t) => t.slug === params.slug);
-	if (!template) {
-		error(404, 'Forum not found');
+	const templateFromLibrary = planningProjectLibrary.find((t) => t.slug === params.slug);
+	const templateConfig = getTemplateConfig(params.slug);
+
+	let title = templateFromLibrary?.title ?? templateConfig?.title;
+	let description = templateFromLibrary?.description ?? templateConfig?.description;
+
+	if (!title) {
+		const { data: subject } = await locals.supabase
+			.from('forum_subjects')
+			.select('title, description')
+			.eq('slug', params.slug)
+			.maybeSingle();
+
+		if (!subject) {
+			error(404, 'Forum not found');
+		}
+
+		title = subject.title;
+		description = subject.description ?? '';
 	}
 
 	const feed = await loadForumFeed(locals.supabase, params.slug, locals.user?.id ?? null);
 
 	return {
-		template,
+		template: {
+			title: title ?? 'Forum',
+			description: description ?? '',
+			slug: params.slug,
+			previewHref:
+				templateFromLibrary?.previewHref ??
+				(templateConfig ? `/templates/${params.slug}` : undefined)
+		},
 		feed,
 		subjectSlug: params.slug
 	};

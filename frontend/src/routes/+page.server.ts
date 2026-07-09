@@ -1,7 +1,5 @@
-import { getProjectThumbnail, communityForumPosts } from '$lib/data/planning-projects';
-import { createActions } from '$lib/data/create-actions';
-import { planningProjectLibrary } from '$lib/data/planning-projects';
-import type { LibraryProject } from '$lib/types/library';
+import { getProjectThumbnail, communityForumPosts, createColumnActions } from '$lib/data/planning-projects';
+import { planningProjectLibrary } from '$lib/data/planning-projects';import type { LibraryProject } from '$lib/types/library';
 import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ locals }) => {
@@ -78,6 +76,6 @@ export const load: PageServerLoad = async ({ locals }) => {
 		templates: planningProjectLibrary,
 		projects,
 		communityPosts: communityForumPosts,
-		createActions
+		createActions: createColumnActions
 	};
 };
